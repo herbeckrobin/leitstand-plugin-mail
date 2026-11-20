@@ -1,0 +1,43 @@
+name: mail
+version: 1.0.0
+titel: Mail
+beschreibung: Mail über IMAP (Mailcow, Google per App-Passwort). Lesen, suchen, Entwürfe anlegen, ändern und verschieben, Entwürfe landen im Entwürfe-Ordner und Robin schickt sie selbst ab. Der Postfach-Wächter meldet neue Mails per IDLE als Ereignis mail.neu, nur mit Kontoname und Zahlen. Versand gibt es nicht.
+start: [bun, dist/server.js]
+dauer: true
+ereignisse: [mail.neu]
+werkzeuge:
+  posteingang: { art: lesen, stufe: frei, text: Listet die neuesten Mails eines Ordners }
+  suchen: { art: lesen, stufe: frei, text: Sucht Mails nach Absender, Betreff, Datum oder Lesestatus }
+  lesen: { art: lesen, stufe: frei, text: Liest eine Mail mit Text und Anhangsliste }
+  entwuerfe_liste: { art: lesen, stufe: frei, text: Listet die Entwürfe eines Kontos }
+  entwurf_neu: { art: schreiben, stufe: frei, text: Legt einen neuen Entwurf an, versendet nichts }
+  antwort_entwurf: { art: schreiben, stufe: frei, text: Legt eine Antwort als Entwurf im Verlauf an, versendet nichts }
+  entwurf_aendern: { art: schreiben, stufe: frei, text: Ändert einen Entwurf }
+  entwurf_loeschen: { art: schreiben, stufe: frei, text: Löscht einen Entwurf (Gmail: in den Papierkorb) }
+  verschieben: { art: schreiben, stufe: frei, text: Verschiebt Mails in einen anderen Ordner }
+  triage_merke: { art: schreiben, stufe: frei, text: Merkt, was die Poststelle aus einer Mail gemacht hat }
+  anhang_speichern:
+    art: schreiben
+    stufe: karte
+    text: Speichert einen Anhang unter dem Hauptverzeichnis
+    hinweis: Schreibt eine Datei aus einer fremden Mail auf die Platte
+rechte:
+  lesen: [haupt]
+  schreiben: [haupt]
+  netz: [mail.robinherbeck.com, imap.gmail.com]
+einstellungen:
+  konten:
+    typ: string
+    titel: Konten als JSON-Liste, je Eintrag name, host, benutzer, optional port (993), adresse, anzeigename, loeschen (expunge oder papierkorb, Gmail papierkorb)
+    pflicht: true
+  passwoerter:
+    typ: string
+    titel: Passwörter als JSON-Objekt, Kontoname auf Passwort (Google mit App-Passwort)
+    geheim: true
+    pflicht: true
+  signatur_html:
+    typ: string
+    titel: Signatur als HTML für Entwürfe
+  signatur_text:
+    typ: string
+    titel: Signatur als Klartext für den Textteil

@@ -1,0 +1,21 @@
+{
+  "name": "leitstand-plugin-mail",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "bau": "bun build --target bun server.ts --outfile dist/server.js"
+  },
+  "dependencies": {
+    "imapflow": "2.10.0",
+    "nodemailer": "10.3.1",
+    "postal-mime": "4.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/nodemailer": "latest",
+    "typescript": "^7.0.2"
+  }
+}
