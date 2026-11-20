@@ -1,5 +1,5 @@
 name: mail
-version: 1.0.0
+version: 1.1.0
 titel: Mail
 beschreibung: Mail über IMAP (Mailcow, Google per App-Passwort). Lesen, suchen, Entwürfe anlegen, ändern und verschieben, Entwürfe landen im Entwürfe-Ordner und Robin schickt sie selbst ab. Der Postfach-Wächter meldet neue Mails per IDLE als Ereignis mail.neu, nur mit Kontoname und Zahlen. Versand gibt es nicht.
 start: [bun, dist/server.js]
@@ -21,6 +21,7 @@ werkzeuge:
     stufe: karte
     text: Speichert einen Anhang unter dem Hauptverzeichnis
     hinweis: Schreibt eine Datei aus einer fremden Mail auf die Platte
+rules: [rules/mail.md]
 rechte:
   lesen: [haupt]
   schreiben: [haupt]

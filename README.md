@@ -12,6 +12,14 @@ Das Gateway stellt `mail_` voran, im Plugin heißen sie ohne Präfix.
 
 Die Stufen sind der Vorschlag aus dem bisherigen Gateway-Modul (10 frei, 1 Karte). Bei Aufnahme und Update zeigt die Karte sie, Robin bestätigt oder ändert sie.
 
+## Rollenregel
+
+`rules/mail.md` liegt im Plugin, `plugin.yml` führt sie unter `rules: [rules/mail.md]`. Sie ist die Mail-Regel für Rollen mit diesem Plugin (Kopie der bisherigen Modulregel aus dem Leitstand-Repo).
+
+## Strukturiertes Ergebnis
+
+`posteingang`, `suchen` und `entwuerfe_liste` liefern neben dem Text (unverändert, für Sessions) ein MCP-`structuredContent`: `{ konto, ordner, mails: [...] }`. Je Mail: `konto`, `ordner`, `uid`, `message_id`, `betreff`, `von`, `an`, `cc` (je Liste aus `{ name, adresse }`), `datum` (ISO), `flags` (IMAP-Flags wie `\Seen`, `\Draft`), `in_reply_to`, `references` (Liste von Message-IDs). Damit ordnet der Leitstand einen Entwurf seiner Karte zu. `references` kommt aus der Kopfzeile References, die die Liste dafür mit abruft. Gesendet-Ordner: `posteingang` oder `suchen` mit `ordner`. Alle anderen Werkzeuge liefern nur Text.
+
 ## Dauerprozess und Ereignis
 
 `dauer: true`: das Gateway startet den Prozess beim Laden und hält ihn am Leben (Neustart mit Backoff, siehe `docs/plugin-vorlage.md` im Leitstand-Repo). Der Wächter hält je Konto eine IMAP-Verbindung mit IDLE auf INBOX und sieht den Gesendet-Ordner im Takt nach. Gezählt wird über UIDNEXT, eine Lücke nach einem Abbruch oder Neustart zählt genau einmal, ein Wechsel der UIDVALIDITY setzt eine neue Basis ohne Zählung.

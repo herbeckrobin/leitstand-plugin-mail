@@ -45908,6 +45908,15 @@ var normId = (id2) => id2.trim().replace(/^<|>$/g, "").toLowerCase();
 class WerkzeugFehler extends Error {
 }
 
+class Strukturiert {
+  text;
+  struktur;
+  constructor(text2, struktur) {
+    this.text = text2;
+    this.struktur = struktur;
+  }
+}
+
 // waechter.ts
 import { mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
 import { dirname as dirname2 } from "path";
@@ -57491,6 +57500,27 @@ var zusammenfassung = (n, ordner) => ({
   ungelesen: n.flags ? !n.flags.has("\\Seen") : null,
   groesse: n.size ?? null
 });
+function referenzen(h) {
+  if (!h)
+    return [];
+  const m = /^references:[ \t]*((?:.*)(?:\r?\n[ \t].*)*)/im.exec(h.toString("utf8"));
+  return m ? m[1].split(/\s+/).filter(Boolean) : [];
+}
+var person = (l) => (l ?? []).filter((p) => p.address).map((p) => ({ name: p.name || null, adresse: p.address }));
+var felder = (n, konto, ordner) => ({
+  konto,
+  ordner,
+  uid: n.uid,
+  message_id: n.envelope?.messageId ?? null,
+  betreff: n.envelope?.subject ?? "",
+  von: person(n.envelope?.from),
+  an: person(n.envelope?.to),
+  cc: person(n.envelope?.cc),
+  datum: iso(n.envelope?.date ?? n.internalDate),
+  flags: [...n.flags ?? []].sort(),
+  in_reply_to: n.envelope?.inReplyTo ?? null,
+  references: referenzen(n.headers)
+});
 function mailWerkzeuge(o) {
   const wurzeln = o.wurzeln ?? wurzelnAusUmgebung();
   const filter = o.betreffFilter?.trim() || null;
@@ -57543,16 +57573,17 @@ function mailWerkzeuge(o) {
     }
   }
   const passt = (u) => !filter || (u?.subject ?? "").includes(filter);
-  async function liste_(c, pfad, q, anzahl) {
+  async function liste_(k, c, pfad, q, anzahl) {
     const such = filter ? { ...q, subject: q.subject ? q.subject : filter } : q;
     const uids = (await c.search(Object.keys(such).length ? such : { all: true }, { uid: true }) || []).sort((a, b) => a - b).slice(-anzahl);
-    if (!uids.length)
-      return [];
     const aus = [];
-    for await (const n of c.fetch(uids, { uid: true, envelope: true, flags: true, internalDate: true, size: true }, { uid: true }))
-      if (passt(n.envelope))
-        aus.push(n);
-    return aus.sort((a, b) => b.uid - a.uid).map((n) => zusammenfassung(n, pfad));
+    if (uids.length) {
+      for await (const n of c.fetch(uids, { uid: true, envelope: true, flags: true, internalDate: true, size: true, headers: ["references"] }, { uid: true }))
+        if (passt(n.envelope))
+          aus.push(n);
+    }
+    aus.sort((a, b) => b.uid - a.uid);
+    return { mails: aus.map((n) => zusammenfassung(n, pfad)), felder: aus.map((n) => felder(n, k.name, pfad)) };
   }
   async function hole(c, uid) {
     const n = await c.fetchOne(String(uid), { uid: true, envelope: true, flags: true, size: true, source: true }, { uid: true });
@@ -57608,7 +57639,8 @@ function mailWerkzeuge(o) {
         const nurNeu = bool(a, "nur_ungelesen", false);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
-          return { konto: k.name, ordner: pfad, mails: await imOrdner(c, pfad, () => liste_(c, pfad, nurNeu ? { seen: false } : {}, anzahl)) };
+          const l = await imOrdner(c, pfad, () => liste_(k, c, pfad, nurNeu ? { seen: false } : {}, anzahl));
+          return new Strukturiert({ konto: k.name, ordner: pfad, mails: l.mails }, { konto: k.name, ordner: pfad, mails: l.felder });
         });
       }
     },
@@ -57639,7 +57671,7 @@ function mailWerkzeuge(o) {
           q.from = von;
         if (betreff) {
           if (filter && !betreff.includes(filter) && !filter.includes(betreff))
-            return { konto: k.name, mails: [] };
+            return new Strukturiert({ konto: k.name, mails: [] }, { konto: k.name, ordner: str(a, "ordner") ?? "INBOX", mails: [] });
           q.subject = betreff;
         }
         if (seit)
@@ -57651,7 +57683,8 @@ function mailWerkzeuge(o) {
         const anzahl = zahl(a, "anzahl", 30, 1, MAX_ANZAHL);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
-          return { konto: k.name, ordner: pfad, mails: await imOrdner(c, pfad, () => liste_(c, pfad, q, anzahl)) };
+          const l = await imOrdner(c, pfad, () => liste_(k, c, pfad, q, anzahl));
+          return new Strukturiert({ konto: k.name, ordner: pfad, mails: l.mails }, { konto: k.name, ordner: pfad, mails: l.felder });
         });
       }
     },
@@ -57783,7 +57816,8 @@ function mailWerkzeuge(o) {
         const anzahl = zahl(a, "anzahl", 30, 1, MAX_ANZAHL);
         return k.verbindung.mit(async (c) => {
           const d = await drafts(k, c);
-          return { konto: k.name, ordner: d, entwuerfe: await imOrdner(c, d, () => liste_(c, d, {}, anzahl)) };
+          const l = await imOrdner(c, d, () => liste_(k, c, d, {}, anzahl));
+          return new Strukturiert({ konto: k.name, ordner: d, entwuerfe: l.mails }, { konto: k.name, ordner: d, mails: l.felder });
         });
       }
     },
@@ -57915,7 +57949,7 @@ async function verarbeite(defs, msg) {
   const params = typeof msg.params === "object" && msg.params !== null ? msg.params : {};
   switch (msg.method) {
     case "initialize":
-      return antwort({ protocolVersion: typeof params.protocolVersion === "string" ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: "mail", version: "1.0.0" } });
+      return antwort({ protocolVersion: typeof params.protocolVersion === "string" ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: "mail", version: "1.1.0" } });
     case "ping":
       return antwort({});
     case "tools/list":
@@ -57931,6 +57965,8 @@ async function verarbeite(defs, msg) {
         if (fremd.length)
           throw new WerkzeugFehler(`unbekanntes Argument: ${fremd.slice(0, 3).join(", ")}`);
         const r = await d.aufruf(a, WER);
+        if (r instanceof Strukturiert)
+          return antwort({ content: [{ type: "text", text: JSON.stringify(r.text) }], structuredContent: r.struktur });
         return antwort({ content: [{ type: "text", text: JSON.stringify(r) }] });
       } catch (e) {
         const text2 = e instanceof WerkzeugFehler ? e.message : `Interner Fehler: ${e instanceof Error ? e.message.slice(0, 200) : "unbekannt"}`;

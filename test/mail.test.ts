@@ -170,7 +170,7 @@ class WerkzeugDoppel implements ImapLike {
   }
   async *fetch(): AsyncIterable<ImapNachricht> {
     yield { uid: 1, envelope: { subject: 'Eins', from: [{ name: 'A', address: 'a@example.test' }] }, flags: new Set(['\\Seen']) };
-    yield { uid: 2, envelope: { subject: 'Zwei', from: [{ address: 'b@example.test' }] }, flags: new Set<string>() };
+    yield { uid: 2, envelope: { subject: 'Zwei', messageId: '<zwei@example.test>', inReplyTo: '<eins@example.test>', from: [{ address: 'b@example.test' }], to: [{ name: 'C', address: 'c@example.test' }], date: new Date('2026-11-20T10:00:00Z') }, flags: new Set<string>(['\\Draft']), headers: Buffer.from('References: <alt@example.test>\r\n <eins@example.test>\r\n') };
   }
   async fetchOne() {
     return false as const;
@@ -193,8 +193,8 @@ describe('Protokoll und Werkzeuge', () => {
   const defs = () => lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(env, () => doppel), triageDatei: () => join(wurzel, 'triage.json') }));
   const rufe = async (name: string, a: Record<string, unknown>) => {
     const r = await verarbeite(defs(), { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: a } });
-    const res = r!.result as { isError?: boolean; content: { text: string }[] };
-    return { isError: res.isError, text: res.content[0]!.text };
+    const res = r!.result as { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, unknown> };
+    return { isError: res.isError, text: res.content[0]!.text, struktur: res.structuredContent };
   };
 
   test('tools/list: Namen ohne Präfix, readOnlyHint nur bei den vier Lesewerkzeugen', async () => {
@@ -217,6 +217,43 @@ describe('Protokoll und Werkzeuge', () => {
     expect(r.isError).toBeUndefined();
     expect(r.text).toContain('Zwei');
     expect(r.text).toContain('b@example.test');
+  });
+
+  test('posteingang, suchen und entwuerfe_liste liefern zusätzlich structuredContent, der Text bleibt', async () => {
+    for (const [name, a] of [['posteingang', {}], ['suchen', { von: 'b' }], ['entwuerfe_liste', {}]] as const) {
+      const r = await rufe(name, a);
+      expect(r.isError).toBeUndefined();
+      expect(JSON.parse(r.text).konto).toBe('privat');
+      const mails = r.struktur!.mails as Record<string, unknown>[];
+      expect(mails.map((m) => m.uid)).toEqual([2, 1]);
+      expect(r.struktur!.konto).toBe('privat');
+      expect(mails[0]).toEqual({
+        konto: 'privat',
+        ordner: name === 'entwuerfe_liste' ? 'Drafts' : 'INBOX',
+        uid: 2,
+        message_id: '<zwei@example.test>',
+        betreff: 'Zwei',
+        von: [{ name: null, adresse: 'b@example.test' }],
+        an: [{ name: 'C', adresse: 'c@example.test' }],
+        cc: [],
+        datum: '2026-11-20T10:00:00.000Z',
+        flags: ['\\Draft'],
+        in_reply_to: '<eins@example.test>',
+        references: ['<alt@example.test>', '<eins@example.test>'],
+      });
+      expect(mails[1]).toMatchObject({ uid: 1, message_id: null, in_reply_to: null, references: [], flags: ['\\Seen'] });
+    }
+    expect((await rufe('posteingang', {})).text).toContain('"ungelesen":true');
+  });
+
+  test('Werkzeuge ohne Liste liefern kein structuredContent', async () => {
+    expect((await rufe('triage_merke', { message_id: '<x@y>', gate: 'klar', aktion: 'archiviert' })).struktur).toBeUndefined();
+  });
+
+  test('plugin.yml führt die Rollenregel, und die Datei liegt im Plugin', () => {
+    const yml = readFileSync(join(import.meta.dir, '..', 'plugin.yml'), 'utf8');
+    expect(yml).toMatch(/^rules: \[rules\/mail\.md\]$/m);
+    expect(readFileSync(join(import.meta.dir, '..', 'rules', 'mail.md'), 'utf8').length).toBeGreaterThan(500);
   });
 
   test('unbekanntes Argument und unbekanntes Werkzeug werden abgelehnt', async () => {

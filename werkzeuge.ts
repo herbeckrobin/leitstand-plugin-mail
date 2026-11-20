@@ -1,7 +1,7 @@
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import PostalMime from 'postal-mime';
-import { WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
+import { Strukturiert, WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
 import { baueAntwort, baueNeu, baueRoh, ENTWURF_KOPF, entwurfKennung, ersetzeText, signaturTeil, type Absender, type Anhang, type Original, type Person } from './bau.ts';
 import { merkeTriage, normId } from './triage.ts';
 import { ImapVerbindung, type ImapLike, type ImapNachricht, type ImapSuche, type Umschlag } from './imap.ts';
@@ -154,6 +154,31 @@ const zusammenfassung = (n: ImapNachricht, ordner: string) => ({
   groesse: n.size ?? null,
 });
 
+/** Die Kopfzeile References aus den rohen Kopfzeilen (gefaltete Zeilen werden zusammengezogen), als Liste von Message-IDs. */
+export function referenzen(h?: Buffer): string[] {
+  if (!h) return [];
+  const m = /^references:[ \t]*((?:.*)(?:\r?\n[ \t].*)*)/im.exec(h.toString('utf8'));
+  return m ? m[1]!.split(/\s+/).filter(Boolean) : [];
+}
+
+const person = (l?: { name?: string; address?: string }[]) => (l ?? []).filter((p) => p.address).map((p) => ({ name: p.name || null, adresse: p.address! }));
+
+/** Eine Mail als Felder für den Leitstand (MCP structuredContent), ergänzt um Konto. Der Text für Sessions bleibt davon unberührt. */
+const felder = (n: ImapNachricht, konto: string, ordner: string) => ({
+  konto,
+  ordner,
+  uid: n.uid,
+  message_id: n.envelope?.messageId ?? null,
+  betreff: n.envelope?.subject ?? '',
+  von: person(n.envelope?.from),
+  an: person(n.envelope?.to),
+  cc: person(n.envelope?.cc),
+  datum: iso(n.envelope?.date ?? n.internalDate),
+  flags: [...(n.flags ?? [])].sort(),
+  in_reply_to: n.envelope?.inReplyTo ?? null,
+  references: referenzen(n.headers),
+});
+
 export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
   const wurzeln = o.wurzeln ?? wurzelnAusUmgebung();
   const filter = o.betreffFilter?.trim() || null;
@@ -210,13 +235,14 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
 
   const passt = (u?: Umschlag): boolean => !filter || (u?.subject ?? '').includes(filter);
 
-  async function liste_(c: ImapLike, pfad: string, q: ImapSuche, anzahl: number) {
+  /** Liste einer Suche: `mails` ist der Text für Sessions, `felder` dasselbe strukturiert. Beide Antworten nutzen dieselben Nachrichten. */
+  async function liste_(k: Konto, c: ImapLike, pfad: string, q: ImapSuche, anzahl: number) {
     const such: ImapSuche = filter ? { ...q, subject: q.subject ? q.subject : filter } : q;
     const uids = ((await c.search(Object.keys(such).length ? such : { all: true }, { uid: true })) || []).sort((a, b) => a - b).slice(-anzahl);
-    if (!uids.length) return [];
     const aus: ImapNachricht[] = [];
-    for await (const n of c.fetch(uids, { uid: true, envelope: true, flags: true, internalDate: true, size: true }, { uid: true })) if (passt(n.envelope)) aus.push(n);
-    return aus.sort((a, b) => b.uid - a.uid).map((n) => zusammenfassung(n, pfad));
+    if (uids.length) for await (const n of c.fetch(uids, { uid: true, envelope: true, flags: true, internalDate: true, size: true, headers: ['references'] }, { uid: true })) if (passt(n.envelope)) aus.push(n);
+    aus.sort((a, b) => b.uid - a.uid);
+    return { mails: aus.map((n) => zusammenfassung(n, pfad)), felder: aus.map((n) => felder(n, k.name, pfad)) };
   }
 
   /** Eine Nachricht ganz holen und zerlegen. Mit Filter nur, was den Filter-Betreff trägt. */
@@ -275,7 +301,8 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
         const nurNeu = bool(a, 'nur_ungelesen', false);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, 'ordner') ?? 'INBOX');
-          return { konto: k.name, ordner: pfad, mails: await imOrdner(c, pfad, () => liste_(c, pfad, nurNeu ? { seen: false } : {}, anzahl)) };
+          const l = await imOrdner(c, pfad, () => liste_(k, c, pfad, nurNeu ? { seen: false } : {}, anzahl));
+          return new Strukturiert({ konto: k.name, ordner: pfad, mails: l.mails }, { konto: k.name, ordner: pfad, mails: l.felder });
         });
       },
     },
@@ -304,7 +331,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
         const bis = datum(a, 'bis');
         if (von) q.from = von;
         if (betreff) {
-          if (filter && !betreff.includes(filter) && !filter.includes(betreff)) return { konto: k.name, mails: [] };
+          if (filter && !betreff.includes(filter) && !filter.includes(betreff)) return new Strukturiert({ konto: k.name, mails: [] }, { konto: k.name, ordner: str(a, 'ordner') ?? 'INBOX', mails: [] });
           q.subject = betreff;
         }
         if (seit) q.since = seit;
@@ -313,7 +340,8 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
         const anzahl = zahl(a, 'anzahl', 30, 1, MAX_ANZAHL);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, 'ordner') ?? 'INBOX');
-          return { konto: k.name, ordner: pfad, mails: await imOrdner(c, pfad, () => liste_(c, pfad, q, anzahl)) };
+          const l = await imOrdner(c, pfad, () => liste_(k, c, pfad, q, anzahl));
+          return new Strukturiert({ konto: k.name, ordner: pfad, mails: l.mails }, { konto: k.name, ordner: pfad, mails: l.felder });
         });
       },
     },
@@ -441,7 +469,8 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
         const anzahl = zahl(a, 'anzahl', 30, 1, MAX_ANZAHL);
         return k.verbindung.mit(async (c) => {
           const d = await drafts(k, c);
-          return { konto: k.name, ordner: d, entwuerfe: await imOrdner(c, d, () => liste_(c, d, {}, anzahl)) };
+          const l = await imOrdner(c, d, () => liste_(k, c, d, {}, anzahl));
+          return new Strukturiert({ konto: k.name, ordner: d, entwuerfe: l.mails }, { konto: k.name, ordner: d, mails: l.felder });
         });
       },
     },

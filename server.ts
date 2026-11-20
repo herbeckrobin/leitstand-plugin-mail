@@ -4,7 +4,7 @@ import { baueKonten, leseKonten, lesePasswoerter, type ImapFabrik } from './kont
 import { imapFlow } from './imap.ts';
 import { sichererName } from './pfade.ts';
 import { TRIAGE_DATEI } from './triage.ts';
-import { WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
+import { Strukturiert, WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
 import { imapClient, Waechter, type ImapClient } from './waechter.ts';
 import { mailWerkzeuge } from './werkzeuge.ts';
 
@@ -30,7 +30,7 @@ export async function verarbeite(defs: Werkzeug[], msg: Json): Promise<Json | nu
   const params = (typeof msg.params === 'object' && msg.params !== null ? msg.params : {}) as Json;
   switch (msg.method) {
     case 'initialize':
-      return antwort({ protocolVersion: typeof params.protocolVersion === 'string' ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: 'mail', version: '1.0.0' } });
+      return antwort({ protocolVersion: typeof params.protocolVersion === 'string' ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: 'mail', version: '1.1.0' } });
     case 'ping':
       return antwort({});
     case 'tools/list':
@@ -44,6 +44,7 @@ export async function verarbeite(defs: Werkzeug[], msg: Json): Promise<Json | nu
       try {
         if (fremd.length) throw new WerkzeugFehler(`unbekanntes Argument: ${fremd.slice(0, 3).join(', ')}`);
         const r = await d.aufruf(a, WER);
+        if (r instanceof Strukturiert) return antwort({ content: [{ type: 'text', text: JSON.stringify(r.text) }], structuredContent: r.struktur });
         return antwort({ content: [{ type: 'text', text: JSON.stringify(r) }] });
       } catch (e) {
         const text = e instanceof WerkzeugFehler ? e.message : `Interner Fehler: ${e instanceof Error ? e.message.slice(0, 200) : 'unbekannt'}`;

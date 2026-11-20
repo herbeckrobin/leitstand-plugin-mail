@@ -26,6 +26,8 @@ export interface ImapNachricht {
   internalDate?: Date | string;
   size?: number;
   source?: Buffer;
+  /** Angeforderte Kopfzeilen (headers: [...]), roh. */
+  headers?: Buffer;
 }
 
 export interface ImapSuche {
@@ -46,7 +48,7 @@ export interface ImapLike {
   list(): Promise<{ path: string; specialUse?: string }[]>;
   getMailboxLock(path: string): Promise<{ release(): void }>;
   search(q: ImapSuche, o: { uid: true }): Promise<number[] | false | undefined>;
-  fetch(range: number[] | string, q: Record<string, boolean>, o: { uid: true }): AsyncIterable<ImapNachricht>;
+  fetch(range: number[] | string, q: Record<string, boolean | string[]>, o: { uid: true }): AsyncIterable<ImapNachricht>;
   fetchOne(uid: string, q: Record<string, boolean>, o: { uid: true }): Promise<ImapNachricht | false>;
   append(path: string, inhalt: Buffer, flags: string[]): Promise<{ uid?: number } | false>;
   messageDelete(uids: string, o: { uid: true }): Promise<boolean>;

@@ -16,3 +16,11 @@ export interface Werkzeug {
   nurLesen?: boolean;
   aufruf: (args: Record<string, unknown>, wer: Aufrufer) => Promise<unknown>;
 }
+
+/** Ergebnis mit zwei Gesichtern: `text` geht unverändert als Text an die Session, `struktur` zusätzlich als MCP structuredContent (Felder statt Text für den Leitstand). */
+export class Strukturiert {
+  constructor(
+    readonly text: unknown,
+    readonly struktur: Record<string, unknown>,
+  ) {}
+}
