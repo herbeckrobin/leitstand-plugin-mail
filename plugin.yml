@@ -1,7 +1,7 @@
 name: mail
-version: 1.2.1
+version: "1.2.2"
 titel: Mail
-beschreibung: "Mail über IMAP (Mailcow, Google per App-Passwort). Lesen, suchen, Entwürfe anlegen, ändern und verschieben, Entwürfe landen im Entwürfe-Ordner und Robin schickt sie selbst ab. Der Postfach-Wächter meldet neue Mails per IDLE als Ereignis mail.neu, nur mit Kontoname und Zahlen (Text und daten). Dazu Lesewerkzeuge für den Kern: neue Mails seit Stand, Nachhol-Zählung, Entwurf und Gesendet finden, Kontoprüfung. Versand gibt es nicht."
+beschreibung: "Mail über IMAP (Mailcow, Google per App-Passwort): lesen, suchen, Entwürfe anlegen, ändern und verschieben. Robin schickt Entwürfe selbst ab, Versand gibt es nicht. Der Wächter meldet neue Mails per IDLE als Ereignis mail.neu. Dazu Lesewerkzeuge für den Kern und eine Kontoprüfung."
 start: [bun, dist/server.js]
 dauer: true
 ereignisse: [mail.neu]
@@ -34,7 +34,7 @@ rechte:
 einstellungen:
   konten:
     typ: string
-    titel: Konten als JSON-Liste, je Eintrag name, host, benutzer, optional port (993), adresse, anzeigename, loeschen (expunge oder papierkorb, Gmail papierkorb)
+    titel: Konten als JSON-Liste (Felder siehe README)
     pflicht: true
   passwoerter:
     typ: string
