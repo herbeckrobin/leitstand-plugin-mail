@@ -6,11 +6,11 @@ Mail über IMAP als Plugin des Leitstands: lesen, suchen, Entwürfe anlegen, än
 
 Das Gateway stellt `mail_` voran, im Plugin heißen sie ohne Präfix.
 
-- lesend (`stufe: frei`): `posteingang`, `suchen`, `lesen`, `entwuerfe_liste`
+- lesend (`stufe: frei`): `posteingang`, `suchen`, `lesen`, `entwuerfe_liste`, dazu die Kernwerkzeuge `neue_seit`, `nachhol_zaehle`, `entwurf_finde`, `gesendet_finde`, `konto_pruefe` (unten)
 - schreibend, `stufe: frei`: `entwurf_neu`, `antwort_entwurf`, `entwurf_aendern`, `entwurf_loeschen`, `verschieben`, `triage_merke`
 - schreibend, `stufe: karte`: `anhang_speichern` (schreibt eine Datei aus einer fremden Mail auf die Platte)
 
-Die Stufen sind der Vorschlag aus dem bisherigen Gateway-Modul (10 frei, 1 Karte). Bei Aufnahme und Update zeigt die Karte sie, Robin bestätigt oder ändert sie.
+Die Stufen sind der Vorschlag aus dem bisherigen Gateway-Modul (10 frei, 1 Karte), die fünf Kernwerkzeuge sind lesend und `frei`. Bei Aufnahme und Update zeigt die Karte sie, Robin bestätigt oder ändert sie.
 
 ## Rollenregel
 
@@ -20,11 +20,23 @@ Die Stufen sind der Vorschlag aus dem bisherigen Gateway-Modul (10 frei, 1 Karte
 
 `posteingang`, `suchen` und `entwuerfe_liste` liefern neben dem Text (unverändert, für Sessions) ein MCP-`structuredContent`: `{ konto, ordner, mails: [...] }`. Je Mail: `konto`, `ordner`, `uid`, `message_id`, `betreff`, `von`, `an`, `cc` (je Liste aus `{ name, adresse }`), `datum` (ISO), `flags` (IMAP-Flags wie `\Seen`, `\Draft`), `in_reply_to`, `references` (Liste von Message-IDs). Damit ordnet der Leitstand einen Entwurf seiner Karte zu. `references` kommt aus der Kopfzeile References, die die Liste dafür mit abruft. Gesendet-Ordner: `posteingang` oder `suchen` mit `ordner`. Alle anderen Werkzeuge liefern nur Text.
 
+## Werkzeuge für den Kern
+
+Der Leitstand-Kern ruft diese Werkzeuge auf und prüft die Antworten gegen seine Zod-Schemas (Vertrag: `server/mail-plugin.ts` im Leitstand-Repo). Jede Antwort trägt `structuredContent` in genau dieser Form, daneben steht ein kurzer Text nur aus Zahlen (nie Betreff, Absender oder Inhalt).
+
+- `neue_seit` (`konto`, `uid_next?`, `uid_validity?`): neue INBOX-Mails seit dem Stand. Ohne vollständigen Stand oder bei geänderter `uid_validity` gilt der heutige Stand als Basis, `mails` bleibt leer. Höchstens 50 Mails (die neuesten, aufsteigend nach UID), der Rest zählt in `ausgelassen`. Antwort: `{ konto, stand: { uid_next, uid_validity }, mails: [{ uid, betreff, von }], ausgelassen }`.
+- `nachhol_zaehle`: INBOX-Mails über alle Konten, älter als 24 h, ohne Triage-Entscheidung oder als `unklar` gemerkt (liest `daten/mail-triage.json`). Antwort: `{ anzahl }`, `null`, wenn ein Konto nicht lesbar ist.
+- `entwurf_finde` (`konto`, `uuid` oder `uid`, `mit_inhalt?`): Entwurf im Entwürfe-Ordner (Special-Use `\Drafts`). `uuid` ist die Kopfzeile `X-Universally-Unique-Identifier`. Antwort: `{ konto, gefunden, entwurf: { Kopf, inhalt: { text, html, anhaenge } | null } | null }`.
+- `gesendet_finde` (`konto`, genau eins von `in_reply_to`, `betreff` (ohne `Re:`/`Aw:`, Plugin entfernt sie auch selbst), `uuid`; `seit_ms?`): Gesendet-Ordner per Special-Use `\Sent`, neueste zuerst, höchstens 20. Antwort: `{ konto, ordner, mails: [Kopf] }`, `ordner` ist `null` ohne Gesendet-Ordner.
+- `konto_pruefe` (`konto?`): meldet sich frisch an und liest die Ordnerliste, sonst nichts. Antwort: `{ konten: [{ konto, ok, fehler, ordner: { entwuerfe, gesendet, papierkorb } }] }`. `fehler` nennt nur die Art (Anmeldung abgelehnt, Verbindungscode), nie Passwort oder Serverantwort.
+
+Der Kopf: `uid`, `message_id`, `in_reply_to`, `betreff`, `an`, `cc` (je `{ name, adresse }`), `datum` (ISO), `flags`.
+
 ## Dauerprozess und Ereignis
 
 `dauer: true`: das Gateway startet den Prozess beim Laden und hält ihn am Leben (Neustart mit Backoff, siehe `docs/plugin-vorlage.md` im Leitstand-Repo). Der Wächter hält je Konto eine IMAP-Verbindung mit IDLE auf INBOX und sieht den Gesendet-Ordner im Takt nach. Gezählt wird über UIDNEXT, eine Lücke nach einem Abbruch oder Neustart zählt genau einmal, ein Wechsel der UIDVALIDITY setzt eine neue Basis ohne Zählung.
 
-Gemeldet wird die MCP-Notification `notifications/leitstand/ereignis` mit `art: mail.neu` und einem Text aus Kontoname und Zahlen (`privat: 2 neu, 1 gesendet`). Nie Betreff, Adresse oder Inhalt. Zählstände und die Nachholzählung bleiben im Kern.
+Gemeldet wird die MCP-Notification `notifications/leitstand/ereignis` mit `art: mail.neu`, einem Text aus Kontoname und Zahlen (`privat: 2 neu, 1 gesendet`) und `daten: { konto, neu, gesendet }` für den Kern. Nie Betreff, Adresse oder Inhalt. Zählstände und die Nachholzählung bleiben im Kern.
 
 ## Einstellungen
 

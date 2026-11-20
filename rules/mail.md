@@ -15,6 +15,8 @@ Mail läuft über die Werkzeuge `mcp__leitstand__mail_*` (IMAP direkt am Server)
 | `mail_entwurf_loeschen` | Nur Entwürfe, die das Gateway selbst angelegt hat |
 | `mail_verschieben` | `uids` in einen anderen Ordner, etwa Archiv |
 
+Fünf weitere Lesewerkzeuge ruft der Leitstand-Kern selbst auf, Sessions brauchen sie selten: `mail_neue_seit` (neue INBOX-Mails seit einem Stand), `mail_nachhol_zaehle` (liegengebliebene Mails als Zahl), `mail_entwurf_finde` (Entwurf per `uuid` oder `uid`, `mit_inhalt` für Text und Anhangsliste), `mail_gesendet_finde` (Gesendet-Ordner, genau eins von `in_reply_to`, `betreff`, `uuid`) und `mail_konto_pruefe` (Anmeldung und Ordner je Konto, nur lesend).
+
 Was das Gateway nicht kann:
 
 - **Versenden gibt es nicht.** Kein SMTP. Entwürfe schickt der Mensch selbst ab.

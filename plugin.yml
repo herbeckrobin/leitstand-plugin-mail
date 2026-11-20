@@ -1,7 +1,7 @@
 name: mail
-version: 1.1.0
+version: 1.2.0
 titel: Mail
-beschreibung: Mail über IMAP (Mailcow, Google per App-Passwort). Lesen, suchen, Entwürfe anlegen, ändern und verschieben, Entwürfe landen im Entwürfe-Ordner und Robin schickt sie selbst ab. Der Postfach-Wächter meldet neue Mails per IDLE als Ereignis mail.neu, nur mit Kontoname und Zahlen. Versand gibt es nicht.
+beschreibung: Mail über IMAP (Mailcow, Google per App-Passwort). Lesen, suchen, Entwürfe anlegen, ändern und verschieben, Entwürfe landen im Entwürfe-Ordner und Robin schickt sie selbst ab. Der Postfach-Wächter meldet neue Mails per IDLE als Ereignis mail.neu, nur mit Kontoname und Zahlen (Text und daten). Dazu Lesewerkzeuge für den Kern: neue Mails seit Stand, Nachhol-Zählung, Entwurf und Gesendet finden, Kontoprüfung. Versand gibt es nicht.
 start: [bun, dist/server.js]
 dauer: true
 ereignisse: [mail.neu]
@@ -10,6 +10,11 @@ werkzeuge:
   suchen: { art: lesen, stufe: frei, text: Sucht Mails nach Absender, Betreff, Datum oder Lesestatus }
   lesen: { art: lesen, stufe: frei, text: Liest eine Mail mit Text und Anhangsliste }
   entwuerfe_liste: { art: lesen, stufe: frei, text: Listet die Entwürfe eines Kontos }
+  neue_seit: { art: lesen, stufe: frei, text: Neue INBOX-Mails seit einem Stand (für den Kern, Betreff und Absender je Mail) }
+  nachhol_zaehle: { art: lesen, stufe: frei, text: Zählt liegengebliebene INBOX-Mails über alle Konten (nur eine Zahl) }
+  entwurf_finde: { art: lesen, stufe: frei, text: Findet einen Entwurf per uuid oder uid, optional mit Text und Anhangsliste }
+  gesendet_finde: { art: lesen, stufe: frei, text: Findet Mails im Gesendet-Ordner per In-Reply-To, Betreff oder uuid }
+  konto_pruefe: { art: lesen, stufe: frei, text: Selbsttest je Konto, nur lesend (Anmeldung und Special-Use-Ordner) }
   entwurf_neu: { art: schreiben, stufe: frei, text: Legt einen neuen Entwurf an, versendet nichts }
   antwort_entwurf: { art: schreiben, stufe: frei, text: Legt eine Antwort als Entwurf im Verlauf an, versendet nichts }
   entwurf_aendern: { art: schreiben, stufe: frei, text: Ändert einen Entwurf }

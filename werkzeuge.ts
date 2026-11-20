@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import PostalMime from 'postal-mime';
 import { Strukturiert, WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
 import { baueAntwort, baueNeu, baueRoh, ENTWURF_KOPF, entwurfKennung, ersetzeText, signaturTeil, type Absender, type Anhang, type Original, type Person } from './bau.ts';
-import { merkeTriage, normId } from './triage.ts';
+import { leseTriage, merkeTriage, normId, zaehleAlle } from './triage.ts';
 import { ImapVerbindung, type ImapLike, type ImapNachricht, type ImapSuche, type Umschlag } from './imap.ts';
 import { pruefePfad, sichererName, wurzelnAusUmgebung, type Wurzeln } from './pfade.ts';
 
@@ -19,6 +19,8 @@ export interface Konto {
   nichtBereit?: () => string | null;
   /** 'papierkorb': Löschen heißt nach \Trash verschieben (Gmail hält \Deleted plus EXPUNGE sonst in "Alle Nachrichten"). */
   loeschen?: 'expunge' | 'papierkorb';
+  /** Frische Verbindung abseits der gemeinsamen (nachhol_zaehle meldet sich selbst an und ab). Wirft ohne Zugang. */
+  neuerClient?: () => ImapLike | Promise<ImapLike>;
 }
 
 export interface MailOrt {
@@ -178,6 +180,33 @@ const felder = (n: ImapNachricht, konto: string, ordner: string) => ({
   in_reply_to: n.envelope?.inReplyTo ?? null,
   references: referenzen(n.headers),
 });
+
+/** Kopf einer Mail für die Kernwerkzeuge (entwurf_finde, gesendet_finde), Form wie im Vertrag mit dem Kern. */
+const kopf = (n: ImapNachricht) => ({
+  uid: n.uid,
+  message_id: n.envelope?.messageId ?? null,
+  in_reply_to: n.envelope?.inReplyTo ?? null,
+  betreff: n.envelope?.subject ?? '',
+  an: person(n.envelope?.to),
+  cc: person(n.envelope?.cc),
+  datum: iso(n.envelope?.date ?? n.internalDate),
+  flags: [...(n.flags ?? [])].sort(),
+});
+
+/** Betreff ohne führende Re:/Aw:, so steht er im Gesendet-Ordner neben dem Original. */
+export const ohneRe = (b: string): string => b.replace(/^\s*((re|aw)\s*:\s*)+/i, '').trim();
+
+const MAX_NEUE = 50;
+const MAX_GESENDET = 20;
+const UUID_KOPF = 'X-Universally-Unique-Identifier';
+
+/** Fehlertext für konto_pruefe: nur Art des Fehlers, nie die Antwort des Servers (kann Zugangsdaten enthalten). */
+function pruefFehler(e: unknown): string {
+  const x = e as { authenticationFailed?: boolean; code?: unknown; name?: unknown };
+  if (x?.authenticationFailed) return 'Anmeldung abgelehnt';
+  const code = typeof x?.code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(x.code) ? x.code : typeof x?.name === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(x.name) ? x.name : 'unbekannt';
+  return `Verbindung fehlgeschlagen (${code})`;
+}
 
 export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
   const wurzeln = o.wurzeln ?? wurzelnAusUmgebung();
@@ -573,6 +602,167 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
         if (!pfad) throw new WerkzeugFehler('Triage-Merkliste nicht eingerichtet (kein Speicherort)');
         merkeTriage(pfad, id, { gate, aktion });
         return { gemerkt: true, gate };
+      },
+    },
+
+    // ---- Werkzeuge für den Kern (A-2294). Antwortform: Vertrag server/mail-plugin.ts im Leitstand-Repo. Der Text enthält nur Zahlen. ----
+    {
+      name: 'mail_neue_seit',
+      beschreibung: 'Neue INBOX-Mails seit einem Stand (uid_next und uid_validity). Ohne Stand oder bei geänderter uid_validity ist der heutige Stand die Basis und mails bleibt leer. Höchstens 50 (die neuesten), der Rest steht in ausgelassen.',
+      nurLesen: true,
+      schema: { type: 'object', properties: { konto: { type: 'string' }, uid_next: { type: 'integer', minimum: 1 }, uid_validity: { type: 'string' } }, required: ['konto'] },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const stand = a.uid_next === undefined || a.uid_validity === undefined ? null : { uidNext: zahl(a, 'uid_next', null), uidValidity: str(a, 'uid_validity', true) };
+        return k.verbindung.mit(async (c) => {
+          const s = await c.status('INBOX', { uidNext: true, uidValidity: true });
+          if (typeof s.uidNext !== 'number' || s.uidNext < 1) throw new WerkzeugFehler('Konto meldet kein UIDNEXT');
+          const jetzt = { uidNext: s.uidNext, uidValidity: String(s.uidValidity ?? '') };
+          const gleich = stand !== null && stand.uidValidity === jetzt.uidValidity;
+          const antwort = (st: typeof jetzt, mails: { uid: number; betreff: string; von: ReturnType<typeof person> }[], ausgelassen: number) =>
+            new Strukturiert(`${k.name}: ${mails.length} neu, ${ausgelassen} ausgelassen`, { konto: k.name, stand: { uid_next: st.uidNext, uid_validity: st.uidValidity }, mails, ausgelassen });
+          if (!gleich || jetzt.uidNext <= stand.uidNext) return antwort(gleich ? { uidNext: stand.uidNext, uidValidity: stand.uidValidity } : jetzt, [], 0);
+          const alle: { uid: number; betreff: string; von: ReturnType<typeof person> }[] = [];
+          await imOrdner(c, 'INBOX', async () => {
+            // n:* liefert immer mindestens die letzte Mail, auch wenn ihre UID unter n liegt: darum zusätzlich filtern.
+            for await (const n of c.fetch(`${stand.uidNext}:*`, { uid: true, envelope: true }, { uid: true })) {
+              if (n.uid < stand.uidNext || n.uid >= jetzt.uidNext) continue;
+              const von = person(n.envelope?.from);
+              const betreff = (n.envelope?.subject ?? '').trim();
+              if (von.length || betreff) alle.push({ uid: n.uid, betreff, von });
+            }
+          });
+          alle.sort((x, y) => x.uid - y.uid);
+          return antwort(jetzt, alle.slice(-MAX_NEUE), Math.max(0, alle.length - MAX_NEUE));
+        });
+      },
+    },
+    {
+      name: 'mail_nachhol_zaehle',
+      beschreibung: 'Zählt INBOX-Mails über alle Konten, die älter als 24 Stunden sind und keine Triage-Entscheidung haben oder als unklar gemerkt sind. anzahl ist null, wenn ein Konto nicht lesbar war.',
+      nurLesen: true,
+      schema: { type: 'object', properties: {} },
+      aufruf: async () => {
+        const konten = aktuell();
+        const anzahl = await zaehleAlle(
+          konten.map((k) => ({
+            id: k.name,
+            neu: () => {
+              const f = k.nichtBereit?.();
+              if (f || !k.neuerClient) throw new Error('Konto nicht bereit');
+              return k.neuerClient();
+            },
+          })),
+          leseTriage(o.triageDatei?.() ?? ''),
+        );
+        return new Strukturiert(anzahl === null ? 'nicht lesbar' : `${anzahl} liegengeblieben`, { anzahl });
+      },
+    },
+    {
+      name: 'mail_entwurf_finde',
+      beschreibung: 'Einen Entwurf im Entwürfe-Ordner finden, über uuid (Kopfzeile X-Universally-Unique-Identifier) oder uid. Mit mit_inhalt kommen Text, HTML und Anhangsliste mit.',
+      nurLesen: true,
+      schema: { type: 'object', properties: { konto: { type: 'string' }, uuid: { type: 'string' }, uid: uidSchema, mit_inhalt: { type: 'boolean', description: 'Standard false' } }, required: ['konto'] },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const uuid = str(a, 'uuid');
+        const uidArg = a.uid === undefined || a.uid === null ? null : zahl(a, 'uid', null);
+        if (uidArg === null && !uuid) throw new WerkzeugFehler('uuid oder uid angeben');
+        const mitInhalt = bool(a, 'mit_inhalt', false);
+        return k.verbindung.mit(async (c) => {
+          const d = await drafts(k, c);
+          const n = await imOrdner(c, d, async (): Promise<ImapNachricht | null> => {
+            let uid = uidArg;
+            if (uid === null) uid = ((await c.search({ header: { [UUID_KOPF]: uuid! } }, { uid: true })) || []).sort((x, y) => y - x)[0] ?? null;
+            if (uid === null) return null;
+            const m = await c.fetchOne(String(uid), { uid: true, envelope: true, flags: true, internalDate: true, source: mitInhalt }, { uid: true });
+            return m || null;
+          });
+          if (!n) return new Strukturiert('nicht gefunden', { konto: k.name, gefunden: false, entwurf: null });
+          let inhalt: { text: string; html: string | null; anhaenge: { name: string | null; typ: string; groesse: number; inline: boolean }[] } | null = null;
+          if (mitInhalt) {
+            if (!n.source) throw new WerkzeugFehler('Entwurf ließ sich nicht laden');
+            if (n.source.length > MAX_QUELLE) throw new WerkzeugFehler('Entwurf ist größer als 40 MB');
+            const p = await PostalMime.parse(n.source);
+            const text = original(p).text;
+            inhalt = {
+              text: text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) : text,
+              html: p.html ?? null,
+              anhaenge: p.attachments.map((x) => ({ name: x.filename ?? null, typ: x.mimeType, groesse: bytes(x.content).length, inline: x.disposition === 'inline' })),
+            };
+          }
+          return new Strukturiert('gefunden', { konto: k.name, gefunden: true, entwurf: { ...kopf(n), inhalt } });
+        });
+      },
+    },
+    {
+      name: 'mail_gesendet_finde',
+      beschreibung: 'Köpfe passender Mails im Gesendet-Ordner (per Special-Use), neueste zuerst, höchstens 20. Genau eine Suchart: in_reply_to, betreff (ohne Re:/Aw:, optional ab seit_ms) oder uuid.',
+      nurLesen: true,
+      schema: {
+        type: 'object',
+        properties: { konto: { type: 'string' }, in_reply_to: { type: 'string' }, betreff: { type: 'string' }, seit_ms: { type: 'integer', description: 'Nur Mails ab diesem Zeitpunkt (ms seit Epoch), nur mit betreff sinnvoll' }, uuid: { type: 'string' } },
+        required: ['konto'],
+      },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const inReplyTo = str(a, 'in_reply_to');
+        const betreff = str(a, 'betreff');
+        const uuid = str(a, 'uuid');
+        if ([inReplyTo, betreff, uuid].filter((x) => x !== null).length !== 1) throw new WerkzeugFehler('genau eins von in_reply_to, betreff, uuid angeben');
+        const seit = a.seit_ms === undefined || a.seit_ms === null ? null : zahl(a, 'seit_ms', null, 0);
+        const suche: ImapSuche = {};
+        if (inReplyTo) suche.header = { 'In-Reply-To': inReplyTo };
+        if (uuid) suche.header = { [UUID_KOPF]: uuid };
+        if (betreff) {
+          const b = ohneRe(betreff);
+          if (!b) throw new WerkzeugFehler('betreff ist nach dem Entfernen von Re:/Aw: leer');
+          suche.subject = b;
+        }
+        if (seit !== null) suche.since = new Date(seit);
+        return k.verbindung.mit(async (c) => {
+          const sent = (await k.verbindung.ordner(c)).find((m) => m.specialUse === '\\Sent')?.path ?? null;
+          if (!sent) return new Strukturiert('kein Gesendet-Ordner', { konto: k.name, ordner: null, mails: [] });
+          const mails = await imOrdner(c, sent, async () => {
+            const uids = ((await c.search(suche, { uid: true })) || []).sort((x, y) => y - x).slice(0, MAX_GESENDET);
+            const aus: ImapNachricht[] = [];
+            if (uids.length) for await (const n of c.fetch(uids, { uid: true, envelope: true, flags: true, internalDate: true }, { uid: true })) aus.push(n);
+            // SINCE kennt nur Tage: genau filtern wir danach.
+            return aus.filter((n) => seit === null || new Date(n.envelope?.date ?? n.internalDate ?? 0).getTime() >= seit).sort((x, y) => y.uid - x.uid);
+          });
+          return new Strukturiert(`${mails.length} gefunden`, { konto: k.name, ordner: sent, mails: mails.map(kopf) });
+        });
+      },
+    },
+    {
+      name: 'mail_konto_pruefe',
+      beschreibung: 'Selbsttest, nur lesend: Anmeldung und Ordner-Liste je Konto, dazu die Special-Use-Ordner Entwürfe, Gesendet, Papierkorb. Ohne konto alle Konten.',
+      nurLesen: true,
+      schema: { type: 'object', properties: { konto: { type: 'string' } } },
+      aufruf: async (a) => {
+        const alle = aktuell();
+        const name = str(a, 'konto');
+        const wahl = name ? alle.filter((x) => x.name === name) : alle;
+        if (name && !wahl.length) throw new WerkzeugFehler(`Konto ${name.slice(0, 40)} gibt es nicht, vorhanden: ${alle.map((x) => x.name).join(', ')}`);
+        const keine = { entwuerfe: null, gesendet: null, papierkorb: null };
+        const konten = [];
+        for (const k of wahl) {
+          const f = k.nichtBereit?.();
+          if (f) {
+            konten.push({ konto: k.name, ok: false, fehler: f, ordner: keine });
+            continue;
+          }
+          try {
+            // Frisch anmelden: eine offene alte Verbindung würde einen inzwischen falschen Zugang verdecken.
+            await k.verbindung.schliesse();
+            const l = await k.verbindung.mit((c) => c.list());
+            const pfad = (u: string): string | null => l.find((m) => m.specialUse === u)?.path ?? null;
+            konten.push({ konto: k.name, ok: true, fehler: null, ordner: { entwuerfe: pfad('\\Drafts'), gesendet: pfad('\\Sent'), papierkorb: pfad('\\Trash') } });
+          } catch (e) {
+            konten.push({ konto: k.name, ok: false, fehler: pruefFehler(e), ordner: keine });
+          }
+        }
+        return new Strukturiert(`${konten.filter((x) => x.ok).length} von ${konten.length} Konten ok`, { konten });
       },
     },
   ];

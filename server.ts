@@ -14,6 +14,14 @@ import { mailWerkzeuge } from './werkzeuge.ts';
 // Der Text einer Meldung enthält nur Kontoname und Zahlen, nie Betreff, Adresse oder Inhalt.
 
 const PROTOKOLL = '2025-03-26';
+const VERSION = '1.2.0';
+
+/** Zahlen des Ereignisses mail.neu, Form wie im Vertrag mit dem Kern (mailNeuDaten). */
+export interface MailNeuDaten {
+  konto: string;
+  neu: number;
+  gesendet: number;
+}
 const WER: Aufrufer = { session: 'plugin-mail' };
 
 type Json = Record<string, unknown>;
@@ -30,7 +38,7 @@ export async function verarbeite(defs: Werkzeug[], msg: Json): Promise<Json | nu
   const params = (typeof msg.params === 'object' && msg.params !== null ? msg.params : {}) as Json;
   switch (msg.method) {
     case 'initialize':
-      return antwort({ protocolVersion: typeof params.protocolVersion === 'string' ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: 'mail', version: '1.1.0' } });
+      return antwort({ protocolVersion: typeof params.protocolVersion === 'string' ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: 'mail', version: VERSION } });
     case 'ping':
       return antwort({});
     case 'tools/list':
@@ -60,8 +68,8 @@ export interface WaechterStart {
   env: Record<string, string | undefined>;
   /** Ordner für UIDNEXT-Stand und Triage-Merkliste. */
   daten: string;
-  /** Schreibt die Notification an den Leitstand. */
-  melde: (art: string, text: string) => void;
+  /** Schreibt die Notification an den Leitstand: art, Text für Menschen und die Zahlen als daten. */
+  melde: (art: string, text: string, daten: MailNeuDaten) => void;
   log: (zeile: string) => void;
   /** Für Tests: der IMAP-Client je Konto. */
   client?: (z: { host: string; port: number; user: string; pass: string }) => ImapClient;
@@ -91,8 +99,9 @@ export function starteWaechter(o: WaechterStart): Waechter[] {
     const w = new Waechter({
       neuerClient: () => (o.client ?? imapClient)({ host: c.host, port: c.port, user: c.benutzer, pass }),
       melde: ({ anzahl, gesendet }) => {
-        if (anzahl > 0) o.melde('mail.neu', `${c.name}: ${anzahl} neu${gesendet > 0 ? `, ${gesendet} gesendet` : ''}`);
-        else o.melde('mail.neu', `${c.name}: ${gesendet} gesendet`);
+        const daten: MailNeuDaten = { konto: c.name, neu: anzahl, gesendet };
+        if (anzahl > 0) o.melde('mail.neu', `${c.name}: ${anzahl} neu${gesendet > 0 ? `, ${gesendet} gesendet` : ''}`, daten);
+        else o.melde('mail.neu', `${c.name}: ${gesendet} gesendet`, daten);
       },
       zustand: (z) => o.log(`Wächter ${c.name}: ${z.art}, ${z.text}`),
       standDatei: join(o.daten, `stand-${sichererName(c.name)}.json`),
@@ -112,7 +121,7 @@ if (import.meta.main) {
   const schreibe = (j: Json): void => void process.stdout.write(`${JSON.stringify(j)}\n`);
   const fabrik: ImapFabrik = imapFlow;
   const defs = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync(daten, { recursive: true }), join(daten, TRIAGE_DATEI)) }));
-  const waechter = starteWaechter({ env: process.env, daten, log, melde: (art, text) => schreibe({ jsonrpc: '2.0', method: 'notifications/leitstand/ereignis', params: { art, text } }) });
+  const waechter = starteWaechter({ env: process.env, daten, log, melde: (art, text, daten) => schreibe({ jsonrpc: '2.0', method: 'notifications/leitstand/ereignis', params: { art, text, daten } }) });
   let rest = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk: string) => {
