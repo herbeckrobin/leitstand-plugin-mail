@@ -83,6 +83,10 @@ export function baueKonten(env: Umgebung = process.env, fabrik: ImapFabrik = ima
   const liste = k.ok ? k.wert : [];
   return liste.map((c) => {
     const pass = p.ok ? p.wert[c.name] : undefined;
+    const neu = (): ImapLike => {
+      if (!pass) throw new Error(`Kein Passwort für Konto ${c.name}`);
+      return fabrik({ host: c.host, port: c.port, user: c.benutzer, pass });
+    };
     const absender: Absender = {
       name: c.anzeigename,
       adresse: c.adresse,
@@ -93,10 +97,8 @@ export function baueKonten(env: Umgebung = process.env, fabrik: ImapFabrik = ima
       name: c.name,
       absender,
       loeschen: c.loeschen,
-      verbindung: new ImapVerbindung(() => {
-        if (!pass) throw new Error(`Kein Passwort für Konto ${c.name}`);
-        return fabrik({ host: c.host, port: c.port, user: c.benutzer, pass });
-      }),
+      verbindung: new ImapVerbindung(neu),
+      neuerClient: neu,
       nichtBereit: () => (pass ? null : p.ok ? `Kein Passwort für Konto ${c.name} in der Einstellung passwoerter` : p.fehler),
     };
   });

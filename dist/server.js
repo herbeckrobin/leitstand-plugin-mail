@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailplug/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailplug/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -45809,6 +45809,11 @@ function baueKonten(env = process.env, fabrik = imapFlow) {
   const liste = k.ok ? k.wert : [];
   return liste.map((c) => {
     const pass = p.ok ? p.wert[c.name] : undefined;
+    const neu = () => {
+      if (!pass)
+        throw new Error(`Kein Passwort f\xFCr Konto ${c.name}`);
+      return fabrik({ host: c.host, port: c.port, user: c.benutzer, pass });
+    };
     const absender = {
       name: c.anzeigename,
       adresse: c.adresse,
@@ -45819,11 +45824,8 @@ function baueKonten(env = process.env, fabrik = imapFlow) {
       name: c.name,
       absender,
       loeschen: c.loeschen,
-      verbindung: new ImapVerbindung(() => {
-        if (!pass)
-          throw new Error(`Kein Passwort f\xFCr Konto ${c.name}`);
-        return fabrik({ host: c.host, port: c.port, user: c.benutzer, pass });
-      }),
+      verbindung: new ImapVerbindung(neu),
+      neuerClient: neu,
       nichtBereit: () => pass ? null : p.ok ? `Kein Passwort f\xFCr Konto ${c.name} in der Einstellung passwoerter` : p.fehler
     };
   });
@@ -45885,6 +45887,7 @@ import { readFileSync, renameSync, writeFileSync } from "fs";
 var TRIAGE_DATEI = "mail-triage.json";
 var AUFBEWAHRUNG_MS = 90 * 24 * 60 * 60 * 1000;
 var ALT_MS = 24 * 60 * 60 * 1000;
+var MAX_PRUEFEN = 500;
 function leseTriage(pfad) {
   try {
     const j = JSON.parse(readFileSync(pfad, "utf8"));
@@ -45903,6 +45906,46 @@ function merkeTriage(pfad, id2, e, jetzt = Date.now()) {
   renameSync(`${pfad}.neu`, pfad);
 }
 var normId = (id2) => id2.trim().replace(/^<|>$/g, "").toLowerCase();
+async function zaehleLiegengebliebene(c, triage, jetzt = Date.now()) {
+  const lock = await c.getMailboxLock("INBOX");
+  try {
+    const grenze = jetzt - ALT_MS;
+    const bis = new Date(new Date(grenze).setUTCHours(0, 0, 0, 0) + 24 * 60 * 60 * 1000);
+    const uids = (await c.search({ before: bis }, { uid: true }) || []).sort((a, b) => a - b).slice(-MAX_PRUEFEN);
+    if (!uids.length)
+      return 0;
+    let n = 0;
+    for await (const m of c.fetch(uids, { uid: true, envelope: true, internalDate: true }, { uid: true })) {
+      const t = new Date(m.internalDate ?? m.envelope?.date ?? 0).getTime();
+      if (!(t < grenze))
+        continue;
+      const e = m.envelope?.messageId ? triage[normId(m.envelope.messageId)] : undefined;
+      if (!e || e.gate === "unklar")
+        n++;
+    }
+    return n;
+  } finally {
+    lock.release();
+  }
+}
+async function zaehleAlle(konten, triage, jetzt = Date.now()) {
+  let summe = 0;
+  for (const k of konten) {
+    let c = null;
+    try {
+      c = await k.neu();
+      c.on?.("error", () => {});
+      await c.connect();
+      summe += await zaehleLiegengebliebene(c, triage, jetzt);
+    } catch {
+      return null;
+    } finally {
+      if (c?.usable)
+        await c.logout().catch(() => {});
+    }
+  }
+  return summe;
+}
 
 // typen.ts
 class WerkzeugFehler extends Error {
@@ -57521,6 +57564,27 @@ var felder = (n, konto, ordner) => ({
   in_reply_to: n.envelope?.inReplyTo ?? null,
   references: referenzen(n.headers)
 });
+var kopf = (n) => ({
+  uid: n.uid,
+  message_id: n.envelope?.messageId ?? null,
+  in_reply_to: n.envelope?.inReplyTo ?? null,
+  betreff: n.envelope?.subject ?? "",
+  an: person(n.envelope?.to),
+  cc: person(n.envelope?.cc),
+  datum: iso(n.envelope?.date ?? n.internalDate),
+  flags: [...n.flags ?? []].sort()
+});
+var ohneRe = (b) => b.replace(/^\s*((re|aw)\s*:\s*)+/i, "").trim();
+var MAX_NEUE = 50;
+var MAX_GESENDET = 20;
+var UUID_KOPF = "X-Universally-Unique-Identifier";
+function pruefFehler(e) {
+  const x = e;
+  if (x?.authenticationFailed)
+    return "Anmeldung abgelehnt";
+  const code = typeof x?.code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(x.code) ? x.code : typeof x?.name === "string" && /^[A-Za-z0-9_]{1,40}$/.test(x.name) ? x.name : "unbekannt";
+  return `Verbindung fehlgeschlagen (${code})`;
+}
 function mailWerkzeuge(o) {
   const wurzeln = o.wurzeln ?? wurzelnAusUmgebung();
   const filter = o.betreffFilter?.trim() || null;
@@ -57876,8 +57940,8 @@ function mailWerkzeuge(o) {
           const d = await drafts(k, c);
           return imOrdner(c, d, async () => {
             const { n } = await hole(c, uid);
-            const kopf = (n.source ?? Buffer.alloc(0)).subarray(0, 64 * 1024).toString("utf8").split(/\r?\n\r?\n/)[0] ?? "";
-            if (!n.flags?.has("\\Draft") || !new RegExp(`^${ENTWURF_KOPF}:`, "im").test(kopf))
+            const kopf2 = (n.source ?? Buffer.alloc(0)).subarray(0, 64 * 1024).toString("utf8").split(/\r?\n\r?\n/)[0] ?? "";
+            if (!n.flags?.has("\\Draft") || !new RegExp(`^${ENTWURF_KOPF}:`, "im").test(kopf2))
               throw new WerkzeugFehler(`UID ${uid} ist kein Entwurf des Gateways, nichts gel\xF6scht`);
             return { geloescht: await entfernen(k, c, uid), uid };
           });
@@ -57932,12 +57996,185 @@ function mailWerkzeuge(o) {
         merkeTriage(pfad, id2, { gate, aktion });
         return { gemerkt: true, gate };
       }
+    },
+    {
+      name: "mail_neue_seit",
+      beschreibung: "Neue INBOX-Mails seit einem Stand (uid_next und uid_validity). Ohne Stand oder bei ge\xE4nderter uid_validity ist der heutige Stand die Basis und mails bleibt leer. H\xF6chstens 50 (die neuesten), der Rest steht in ausgelassen.",
+      nurLesen: true,
+      schema: { type: "object", properties: { konto: { type: "string" }, uid_next: { type: "integer", minimum: 1 }, uid_validity: { type: "string" } }, required: ["konto"] },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const stand = a.uid_next === undefined || a.uid_validity === undefined ? null : { uidNext: zahl(a, "uid_next", null), uidValidity: str(a, "uid_validity", true) };
+        return k.verbindung.mit(async (c) => {
+          const s = await c.status("INBOX", { uidNext: true, uidValidity: true });
+          if (typeof s.uidNext !== "number" || s.uidNext < 1)
+            throw new WerkzeugFehler("Konto meldet kein UIDNEXT");
+          const jetzt = { uidNext: s.uidNext, uidValidity: String(s.uidValidity ?? "") };
+          const gleich = stand !== null && stand.uidValidity === jetzt.uidValidity;
+          const antwort = (st, mails, ausgelassen) => new Strukturiert(`${k.name}: ${mails.length} neu, ${ausgelassen} ausgelassen`, { konto: k.name, stand: { uid_next: st.uidNext, uid_validity: st.uidValidity }, mails, ausgelassen });
+          if (!gleich || jetzt.uidNext <= stand.uidNext)
+            return antwort(gleich ? { uidNext: stand.uidNext, uidValidity: stand.uidValidity } : jetzt, [], 0);
+          const alle = [];
+          await imOrdner(c, "INBOX", async () => {
+            for await (const n of c.fetch(`${stand.uidNext}:*`, { uid: true, envelope: true }, { uid: true })) {
+              if (n.uid < stand.uidNext || n.uid >= jetzt.uidNext)
+                continue;
+              const von = person(n.envelope?.from);
+              const betreff = (n.envelope?.subject ?? "").trim();
+              if (von.length || betreff)
+                alle.push({ uid: n.uid, betreff, von });
+            }
+          });
+          alle.sort((x, y) => x.uid - y.uid);
+          return antwort(jetzt, alle.slice(-MAX_NEUE), Math.max(0, alle.length - MAX_NEUE));
+        });
+      }
+    },
+    {
+      name: "mail_nachhol_zaehle",
+      beschreibung: "Z\xE4hlt INBOX-Mails \xFCber alle Konten, die \xE4lter als 24 Stunden sind und keine Triage-Entscheidung haben oder als unklar gemerkt sind. anzahl ist null, wenn ein Konto nicht lesbar war.",
+      nurLesen: true,
+      schema: { type: "object", properties: {} },
+      aufruf: async () => {
+        const konten = aktuell();
+        const anzahl = await zaehleAlle(konten.map((k) => ({
+          id: k.name,
+          neu: () => {
+            const f = k.nichtBereit?.();
+            if (f || !k.neuerClient)
+              throw new Error("Konto nicht bereit");
+            return k.neuerClient();
+          }
+        })), leseTriage(o.triageDatei?.() ?? ""));
+        return new Strukturiert(anzahl === null ? "nicht lesbar" : `${anzahl} liegengeblieben`, { anzahl });
+      }
+    },
+    {
+      name: "mail_entwurf_finde",
+      beschreibung: "Einen Entwurf im Entw\xFCrfe-Ordner finden, \xFCber uuid (Kopfzeile X-Universally-Unique-Identifier) oder uid. Mit mit_inhalt kommen Text, HTML und Anhangsliste mit.",
+      nurLesen: true,
+      schema: { type: "object", properties: { konto: { type: "string" }, uuid: { type: "string" }, uid: uidSchema, mit_inhalt: { type: "boolean", description: "Standard false" } }, required: ["konto"] },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const uuid = str(a, "uuid");
+        const uidArg = a.uid === undefined || a.uid === null ? null : zahl(a, "uid", null);
+        if (uidArg === null && !uuid)
+          throw new WerkzeugFehler("uuid oder uid angeben");
+        const mitInhalt = bool(a, "mit_inhalt", false);
+        return k.verbindung.mit(async (c) => {
+          const d = await drafts(k, c);
+          const n = await imOrdner(c, d, async () => {
+            let uid = uidArg;
+            if (uid === null)
+              uid = (await c.search({ header: { [UUID_KOPF]: uuid } }, { uid: true }) || []).sort((x, y) => y - x)[0] ?? null;
+            if (uid === null)
+              return null;
+            const m = await c.fetchOne(String(uid), { uid: true, envelope: true, flags: true, internalDate: true, source: mitInhalt }, { uid: true });
+            return m || null;
+          });
+          if (!n)
+            return new Strukturiert("nicht gefunden", { konto: k.name, gefunden: false, entwurf: null });
+          let inhalt = null;
+          if (mitInhalt) {
+            if (!n.source)
+              throw new WerkzeugFehler("Entwurf lie\xDF sich nicht laden");
+            if (n.source.length > MAX_QUELLE)
+              throw new WerkzeugFehler("Entwurf ist gr\xF6\xDFer als 40 MB");
+            const p = await PostalMime.parse(n.source);
+            const text2 = original(p).text;
+            inhalt = {
+              text: text2.length > MAX_TEXT ? text2.slice(0, MAX_TEXT) : text2,
+              html: p.html ?? null,
+              anhaenge: p.attachments.map((x) => ({ name: x.filename ?? null, typ: x.mimeType, groesse: bytes(x.content).length, inline: x.disposition === "inline" }))
+            };
+          }
+          return new Strukturiert("gefunden", { konto: k.name, gefunden: true, entwurf: { ...kopf(n), inhalt } });
+        });
+      }
+    },
+    {
+      name: "mail_gesendet_finde",
+      beschreibung: "K\xF6pfe passender Mails im Gesendet-Ordner (per Special-Use), neueste zuerst, h\xF6chstens 20. Genau eine Suchart: in_reply_to, betreff (ohne Re:/Aw:, optional ab seit_ms) oder uuid.",
+      nurLesen: true,
+      schema: {
+        type: "object",
+        properties: { konto: { type: "string" }, in_reply_to: { type: "string" }, betreff: { type: "string" }, seit_ms: { type: "integer", description: "Nur Mails ab diesem Zeitpunkt (ms seit Epoch), nur mit betreff sinnvoll" }, uuid: { type: "string" } },
+        required: ["konto"]
+      },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const inReplyTo = str(a, "in_reply_to");
+        const betreff = str(a, "betreff");
+        const uuid = str(a, "uuid");
+        if ([inReplyTo, betreff, uuid].filter((x) => x !== null).length !== 1)
+          throw new WerkzeugFehler("genau eins von in_reply_to, betreff, uuid angeben");
+        const seit = a.seit_ms === undefined || a.seit_ms === null ? null : zahl(a, "seit_ms", null, 0);
+        const suche = {};
+        if (inReplyTo)
+          suche.header = { "In-Reply-To": inReplyTo };
+        if (uuid)
+          suche.header = { [UUID_KOPF]: uuid };
+        if (betreff) {
+          const b = ohneRe(betreff);
+          if (!b)
+            throw new WerkzeugFehler("betreff ist nach dem Entfernen von Re:/Aw: leer");
+          suche.subject = b;
+        }
+        if (seit !== null)
+          suche.since = new Date(seit);
+        return k.verbindung.mit(async (c) => {
+          const sent = (await k.verbindung.ordner(c)).find((m) => m.specialUse === "\\Sent")?.path ?? null;
+          if (!sent)
+            return new Strukturiert("kein Gesendet-Ordner", { konto: k.name, ordner: null, mails: [] });
+          const mails = await imOrdner(c, sent, async () => {
+            const uids = (await c.search(suche, { uid: true }) || []).sort((x, y) => y - x).slice(0, MAX_GESENDET);
+            const aus = [];
+            if (uids.length)
+              for await (const n of c.fetch(uids, { uid: true, envelope: true, flags: true, internalDate: true }, { uid: true }))
+                aus.push(n);
+            return aus.filter((n) => seit === null || new Date(n.envelope?.date ?? n.internalDate ?? 0).getTime() >= seit).sort((x, y) => y.uid - x.uid);
+          });
+          return new Strukturiert(`${mails.length} gefunden`, { konto: k.name, ordner: sent, mails: mails.map(kopf) });
+        });
+      }
+    },
+    {
+      name: "mail_konto_pruefe",
+      beschreibung: "Selbsttest, nur lesend: Anmeldung und Ordner-Liste je Konto, dazu die Special-Use-Ordner Entw\xFCrfe, Gesendet, Papierkorb. Ohne konto alle Konten.",
+      nurLesen: true,
+      schema: { type: "object", properties: { konto: { type: "string" } } },
+      aufruf: async (a) => {
+        const alle = aktuell();
+        const name2 = str(a, "konto");
+        const wahl = name2 ? alle.filter((x) => x.name === name2) : alle;
+        if (name2 && !wahl.length)
+          throw new WerkzeugFehler(`Konto ${name2.slice(0, 40)} gibt es nicht, vorhanden: ${alle.map((x) => x.name).join(", ")}`);
+        const keine = { entwuerfe: null, gesendet: null, papierkorb: null };
+        const konten = [];
+        for (const k of wahl) {
+          const f = k.nichtBereit?.();
+          if (f) {
+            konten.push({ konto: k.name, ok: false, fehler: f, ordner: keine });
+            continue;
+          }
+          try {
+            await k.verbindung.schliesse();
+            const l = await k.verbindung.mit((c) => c.list());
+            const pfad = (u) => l.find((m) => m.specialUse === u)?.path ?? null;
+            konten.push({ konto: k.name, ok: true, fehler: null, ordner: { entwuerfe: pfad("\\Drafts"), gesendet: pfad("\\Sent"), papierkorb: pfad("\\Trash") } });
+          } catch (e) {
+            konten.push({ konto: k.name, ok: false, fehler: pruefFehler(e), ordner: keine });
+          }
+        }
+        return new Strukturiert(`${konten.filter((x) => x.ok).length} von ${konten.length} Konten ok`, { konten });
+      }
     }
   ];
 }
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
+var VERSION = "1.2.0";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {
@@ -57949,7 +58186,7 @@ async function verarbeite(defs, msg) {
   const params = typeof msg.params === "object" && msg.params !== null ? msg.params : {};
   switch (msg.method) {
     case "initialize":
-      return antwort({ protocolVersion: typeof params.protocolVersion === "string" ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: "mail", version: "1.1.0" } });
+      return antwort({ protocolVersion: typeof params.protocolVersion === "string" ? params.protocolVersion : PROTOKOLL, capabilities: { tools: {} }, serverInfo: { name: "mail", version: VERSION } });
     case "ping":
       return antwort({});
     case "tools/list":
@@ -57998,10 +58235,11 @@ function starteWaechter(o) {
     const w = new Waechter({
       neuerClient: () => (o.client ?? imapClient)({ host: c.host, port: c.port, user: c.benutzer, pass }),
       melde: ({ anzahl, gesendet }) => {
+        const daten = { konto: c.name, neu: anzahl, gesendet };
         if (anzahl > 0)
-          o.melde("mail.neu", `${c.name}: ${anzahl} neu${gesendet > 0 ? `, ${gesendet} gesendet` : ""}`);
+          o.melde("mail.neu", `${c.name}: ${anzahl} neu${gesendet > 0 ? `, ${gesendet} gesendet` : ""}`, daten);
         else
-          o.melde("mail.neu", `${c.name}: ${gesendet} gesendet`);
+          o.melde("mail.neu", `${c.name}: ${gesendet} gesendet`, daten);
       },
       zustand: (z) => o.log(`W\xE4chter ${c.name}: ${z.art}, ${z.text}`),
       standDatei: join3(o.daten, `stand-${sichererName(c.name)}.json`),
@@ -58022,7 +58260,7 @@ if (import.meta.main) {
 `);
   const fabrik = imapFlow;
   const defs = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync2(daten, { recursive: true }), join3(daten, TRIAGE_DATEI)) }));
-  const waechter = starteWaechter({ env: process.env, daten, log, melde: (art, text2) => schreibe({ jsonrpc: "2.0", method: "notifications/leitstand/ereignis", params: { art, text: text2 } }) });
+  const waechter = starteWaechter({ env: process.env, daten, log, melde: (art, text2, daten2) => schreibe({ jsonrpc: "2.0", method: "notifications/leitstand/ereignis", params: { art, text: text2, daten: daten2 } }) });
   let rest = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {

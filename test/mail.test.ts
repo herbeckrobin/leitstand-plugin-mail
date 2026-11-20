@@ -53,9 +53,9 @@ beforeEach(() => {
 });
 
 const starte = (env: Record<string, string | undefined>, d: WaechterDoppel) => {
-  const meldungen: { art: string; text: string }[] = [];
+  const meldungen: { art: string; text: string; daten: unknown }[] = [];
   const logs: string[] = [];
-  const w = starteWaechter({ env, daten, melde: (art, text) => meldungen.push({ art, text }), log: (z) => logs.push(z), client: () => d, sentMs: 3600_000, backoffMinMs: 5 });
+  const w = starteWaechter({ env, daten, melde: (art, text, d) => meldungen.push({ art, text, daten: d }), log: (z) => logs.push(z), client: () => d, sentMs: 3600_000, backoffMinMs: 5 });
   return { w, meldungen, logs };
 };
 
@@ -68,7 +68,7 @@ describe('Wächter und Ereignis mail.neu', () => {
     d.uidNext.INBOX = 7;
     d.ausloesen('exists');
     await warte(() => meldungen.length === 1);
-    expect(meldungen[0]).toEqual({ art: 'mail.neu', text: 'privat: 2 neu' });
+    expect(meldungen[0]).toEqual({ art: 'mail.neu', text: 'privat: 2 neu', daten: { konto: 'privat', neu: 2, gesendet: 0 } });
     expect(JSON.stringify([meldungen, logs])).not.toContain('geheim-pw-123');
     await Promise.all(w.map((x) => x.stop()));
   });
@@ -162,6 +162,9 @@ class WerkzeugDoppel implements ImapLike {
   async list() {
     return [{ path: 'INBOX' }, { path: 'Drafts', specialUse: '\\Drafts' }, { path: 'Trash', specialUse: '\\Trash' }];
   }
+  async status() {
+    return { uidNext: 3, uidValidity: 1 };
+  }
   async getMailboxLock() {
     return { release() {} };
   }
@@ -197,11 +200,11 @@ describe('Protokoll und Werkzeuge', () => {
     return { isError: res.isError, text: res.content[0]!.text, struktur: res.structuredContent };
   };
 
-  test('tools/list: Namen ohne Präfix, readOnlyHint nur bei den vier Lesewerkzeugen', async () => {
+  test('tools/list: Namen ohne Präfix, readOnlyHint nur bei den neun Lesewerkzeugen', async () => {
     const r = await verarbeite(defs(), { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     const tools = (r!.result as { tools: { name: string; annotations: { readOnlyHint: boolean } }[] }).tools;
-    expect(tools.map((t) => t.name).sort()).toEqual(['anhang_speichern', 'antwort_entwurf', 'entwurf_aendern', 'entwurf_loeschen', 'entwurf_neu', 'entwuerfe_liste', 'lesen', 'posteingang', 'suchen', 'triage_merke', 'verschieben'].sort());
-    expect(tools.filter((t) => t.annotations.readOnlyHint).map((t) => t.name).sort()).toEqual(['entwuerfe_liste', 'lesen', 'posteingang', 'suchen']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['anhang_speichern', 'antwort_entwurf', 'entwurf_aendern', 'entwurf_finde', 'entwurf_loeschen', 'entwurf_neu', 'entwuerfe_liste', 'gesendet_finde', 'konto_pruefe', 'lesen', 'nachhol_zaehle', 'neue_seit', 'posteingang', 'suchen', 'triage_merke', 'verschieben'].sort());
+    expect(tools.filter((t) => t.annotations.readOnlyHint).map((t) => t.name).sort()).toEqual(['entwuerfe_liste', 'entwurf_finde', 'gesendet_finde', 'konto_pruefe', 'lesen', 'nachhol_zaehle', 'neue_seit', 'posteingang', 'suchen']);
   });
 
   test('die plugin.yml und tools/list nennen dieselben Werkzeuge', async () => {

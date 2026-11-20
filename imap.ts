@@ -46,6 +46,7 @@ export interface ImapLike {
   connect(): Promise<void>;
   logout(): Promise<void>;
   list(): Promise<{ path: string; specialUse?: string }[]>;
+  status(path: string, q: { uidNext: true; uidValidity: true }): Promise<{ uidNext?: number; uidValidity?: bigint | number }>;
   getMailboxLock(path: string): Promise<{ release(): void }>;
   search(q: ImapSuche, o: { uid: true }): Promise<number[] | false | undefined>;
   fetch(range: number[] | string, q: Record<string, boolean | string[]>, o: { uid: true }): AsyncIterable<ImapNachricht>;
