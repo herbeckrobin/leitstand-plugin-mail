@@ -175,8 +175,10 @@ class WerkzeugDoppel implements ImapLike {
     yield { uid: 1, envelope: { subject: 'Eins', from: [{ name: 'A', address: 'a@example.test' }] }, flags: new Set(['\\Seen']) };
     yield { uid: 2, envelope: { subject: 'Zwei', messageId: '<zwei@example.test>', inReplyTo: '<eins@example.test>', from: [{ address: 'b@example.test' }], to: [{ name: 'C', address: 'c@example.test' }], date: new Date('2026-11-20T10:00:00Z') }, flags: new Set<string>(['\\Draft']), headers: Buffer.from('References: <alt@example.test>\r\n <eins@example.test>\r\n') };
   }
-  async fetchOne() {
-    return false as const;
+  async fetchOne(uid: string): Promise<ImapNachricht | false> {
+    if (uid !== '2') return false;
+    const source = Buffer.from('From: b@example.test\r\nTo: c@example.test\r\nSubject: Zwei\r\nMessage-ID: <zwei@example.test>\r\nContent-Type: text/plain\r\n\r\nText\r\n');
+    return { uid: 2, envelope: { subject: 'Zwei', messageId: '<zwei@example.test>', from: [{ address: 'b@example.test' }], to: [{ address: 'c@example.test' }] }, flags: new Set<string>(['\\Draft']), source };
   }
   async append(pfad: string, inhalt: Buffer, flags: string[]) {
     this.angehaengt.push({ pfad, roh: inhalt.toString('utf8'), flags });
@@ -275,6 +277,48 @@ describe('Protokoll und Werkzeuge', () => {
     expect(a.flags).toContain('\\Draft');
     expect(a.roh).toContain('Subject: Hallo');
     expect(a.roh).toContain('X-Leitstand-Entwurf');
+  });
+
+  describe('Header-Injection in Entwürfen', () => {
+    const umbrueche = ['\r\n', '\n', '\r', ' '];
+    const gut = { an: ['x@example.test'], betreff: 'Hallo', text: 'Servus' };
+
+    for (const u of umbrueche) {
+      const bez = JSON.stringify(u);
+      test(`entwurf_neu lehnt Umbruch ${bez} in Betreff, Namen und Adressen ab und legt nichts an`, async () => {
+        const vorher = doppel.angehaengt.length;
+        const faelle: Record<string, unknown>[] = [
+          { ...gut, betreff: `Hallo${u}Bcc: evil@example.test` },
+          { ...gut, an: [`"Max${u}Bcc: evil@example.test" <x@example.test>`] },
+          { ...gut, cc: [`"Max${u}Bcc: evil@example.test" <x@example.test>`] },
+          { ...gut, an: [`x@example.test${u}Bcc: evil@example.test`] },
+          { ...gut, an: [`<x@example.test${u}Bcc: evil@example.test>`] },
+          { ...gut, cc: [`y@example.test${u}Bcc: evil@example.test`] },
+        ];
+        for (const f of faelle) {
+          const r = await rufe('entwurf_neu', f);
+          expect(r.isError).toBe(true);
+        }
+        expect(doppel.angehaengt.length).toBe(vorher);
+      });
+    }
+
+    test('entwurf_aendern lehnt Umbruch in Betreff, An und Cc ab und legt nichts an', async () => {
+      const vorher = doppel.angehaengt.length;
+      for (const f of [{ betreff: 'A\r\nBcc: evil@example.test' }, { an: ['a@example.test\r\nBcc: evil@example.test'] }, { cc: ['"N\nBcc: evil@example.test" <c@example.test>'] }]) {
+        const r = await rufe('entwurf_aendern', { uid: 2, ...f });
+        expect(r.isError).toBe(true);
+        expect(r.text).toMatch(/Zeilenumbruch|ungültige Adresse/);
+      }
+      expect(doppel.angehaengt.length).toBe(vorher);
+    });
+
+    test('ein sauberer Entwurf enthält keine eingeschleuste Kopfzeile', async () => {
+      const r = await rufe('entwurf_neu', { ...gut, betreff: 'Bcc: evil@example.test' });
+      expect(r.isError).toBeUndefined();
+      const roh = doppel.angehaengt.at(-1)!.roh;
+      expect(roh).not.toMatch(/^Bcc:/im);
+    });
   });
 
   test('ein Konto ohne Passwort scheitert mit klarer Meldung ohne Wert', async () => {
