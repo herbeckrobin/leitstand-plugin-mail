@@ -69,7 +69,7 @@ export function lesePasswoerter(env: Umgebung = process.env): Ergebnis<Record<st
 export function leseSignatur(env: Umgebung = process.env): { html: string; text: string } | null {
   const html = env.PLUGIN_SIGNATUR_HTML?.trim();
   const klar = env.PLUGIN_SIGNATUR_TEXT?.trim() ?? '';
-  return html ? { html, text: klar } : null;
+  return html || klar ? { html: html ?? '', text: klar } : null;
 }
 
 export type ImapFabrik = (z: KontoZugang) => ImapLike;
@@ -91,7 +91,8 @@ export function baueKonten(env: Umgebung = process.env, fabrik: ImapFabrik = ima
       name: c.anzeigename,
       adresse: c.adresse,
       signatur: klartext,
-      signaturHtml: sig ? () => ({ html: sig.html, text: sig.text, bilder: [] }) : undefined,
+      // Nur Text gesetzt: kein HTML-Teil, signaturTeil baut HTML aus dem Text.
+      signaturHtml: sig?.html ? () => ({ html: sig.html, text: sig.text, bilder: [] }) : undefined,
     };
     return {
       name: c.name,
