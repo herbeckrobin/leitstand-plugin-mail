@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-sigtext/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-distfrisch/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-sigtext/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-distfrisch/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();

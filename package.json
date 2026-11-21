@@ -6,7 +6,8 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "bau": "bun build --target bun server.ts --outfile dist/server.js"
+    "bau": "bun build --target bun server.ts --outfile dist/server.js",
+    "prepare": "sh skripte/hooks-setzen.sh"
   },
   "dependencies": {
     "imapflow": "2.10.0",
