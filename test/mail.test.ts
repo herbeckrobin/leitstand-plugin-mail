@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ImapLike, ImapNachricht, ImapSuche } from '../imap.ts';
-import { baueKonten, leseKonten, lesePasswoerter } from '../konten.ts';
+import { baueNeu, signaturTeil } from '../bau.ts';
+import { baueKonten, leseKonten, lesePasswoerter, leseSignatur } from '../konten.ts';
 import { lokaleWerkzeuge, starteWaechter, verarbeite } from '../server.ts';
 import type { ImapClient } from '../waechter.ts';
 import { mailWerkzeuge } from '../werkzeuge.ts';
@@ -143,6 +144,35 @@ describe('Einstellungen', () => {
     expect(leseKonten({ PLUGIN_KONTEN: '[{"name":"a","host":"h","benutzer":"u"},{"name":"a","host":"h","benutzer":"u"}]' }).ok).toBe(false);
     const r = leseKonten({ PLUGIN_KONTEN: '[{"name":"a","host":"h","benutzer":"u","loeschen":"papierkorb"}]' });
     expect(r.ok && r.wert[0]).toMatchObject({ port: 993, adresse: 'u', anzeigename: 'a', loeschen: 'papierkorb' });
+  });
+
+  test('Signatur: nur Text, nur HTML, beides leer', async () => {
+    const basis = { PLUGIN_KONTEN: KONTEN, PLUGIN_PASSWOERTER: PASS };
+    const entwurf = async (env: Record<string, string | undefined>) => {
+      const a = baueKonten({ ...basis, ...env })[0]!.absender;
+      const roh = (await baueNeu({ absender: a, an: [{ address: 'x@example.test' }], cc: [], betreff: 'b', text: 'Hallo', signatur: true, anhaenge: [], session: 's' })).toString();
+      return { a, roh };
+    };
+    expect(leseSignatur({})).toBeNull();
+    expect(leseSignatur({ PLUGIN_SIGNATUR_TEXT: ' Gruß\nMax ' })).toEqual({ html: '', text: 'Gruß\nMax' });
+
+    const nurText = await entwurf({ PLUGIN_SIGNATUR_TEXT: 'Viele Grüße\nMax' });
+    expect(nurText.a.signatur).toBe('Viele Grüße\nMax');
+    expect(nurText.a.signaturHtml).toBeUndefined();
+    expect(signaturTeil(nurText.a, true)?.html).toContain('Viele Grüße<br>Max');
+    expect(nurText.roh).toContain('Viele Gr');
+    expect(nurText.roh).toContain('<br>Max');
+
+    const nurHtml = baueKonten({ ...basis, PLUGIN_SIGNATUR_HTML: '<p>HTML-Gruß</p>' })[0]!.absender;
+    expect(nurHtml.signatur).toBe('');
+    expect(signaturTeil(nurHtml, true)?.text).toBe('HTML-Gruß');
+    const beide = baueKonten({ ...basis, PLUGIN_SIGNATUR_HTML: '<p>HTML-Gruß</p>', PLUGIN_SIGNATUR_TEXT: 'Text-Gruß' })[0]!.absender;
+    expect(signaturTeil(beide, true)?.text).toBe('Text-Gruß');
+
+    const leer = baueKonten({ ...basis, PLUGIN_SIGNATUR_HTML: ' ', PLUGIN_SIGNATUR_TEXT: '' })[0]!.absender;
+    expect(leer.signatur).toBe('');
+    expect(leer.signaturHtml).toBeUndefined();
+    expect(signaturTeil(leer, true)).toBeNull();
   });
 
   test('ein Konto ohne Passwort ist nicht bereit und nennt keinen Wert', () => {

@@ -42,7 +42,7 @@ Gemeldet wird die MCP-Notification `notifications/leitstand/ereignis` mit `art: 
 
 - `konten` (Pflicht): JSON-Liste, je Eintrag `name`, `host`, `benutzer`, optional `port` (993), `adresse`, `anzeigename`, `loeschen` (`expunge` oder `papierkorb`, Gmail braucht `papierkorb`). Setzbar mit `plugin_wert_setzen`.
 - `passwoerter` (Pflicht, geheim): JSON-Objekt Kontoname auf Passwort, Google mit App-Passwort. Nur das Fenster trägt es ein (Schlüsselbund). Ein Parsefehler nennt nie einen Teil des Werts.
-- `signatur_html`, `signatur_text`: Signatur für Entwürfe.
+- `signatur_html`, `signatur_text`: Signatur für Entwürfe. `signatur_text` allein genügt (HTML wird daraus gebaut), mit `signatur_html` dient `signatur_text` als Textteil. Beide leer: kein Gruß.
 
 Beispiel `konten` (ohne Zugangsdaten):
 
