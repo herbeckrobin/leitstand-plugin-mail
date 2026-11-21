@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,8 +24,11 @@ test('dist/server.js passt zum Quelltext', async () => {
   }
 });
 
-test('package.json: bau baut genau diesen Befehl, prepare setzt die Hooks', () => {
+test('package.json: bau baut genau diesen Befehl, kein Skript setzt Git-Config', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
   expect(pkg.scripts.bau).toBe('bun build --target bun server.ts --outfile dist/server.js');
-  expect(pkg.scripts.prepare).toBe('sh skripte/hooks-setzen.sh');
+  // git_push des Leitstands lehnt ein Repo ab, dessen Config core.hooksPath setzt. Darum läuft bei bun install nichts.
+  for (const name of ['preinstall', 'install', 'postinstall', 'prepare']) expect(pkg.scripts[name], name).toBeUndefined();
+  expect(existsSync(join(ROOT, '.githooks'))).toBe(false);
+  expect(existsSync(join(ROOT, 'skripte', 'hooks-setzen.sh'))).toBe(false);
 });

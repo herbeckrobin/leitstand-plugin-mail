@@ -72,9 +72,8 @@ bun run typecheck
 bun test
 ```
 
-Zwei Sicherungen halten das Bundle aktuell:
+Das Bundle hält ein Test aktuell, kein Git-Hook. Das Repo setzt bewusst keinen Git-Config-Wert (`core.hooksPath` und Ähnliches): `git_push` des Leitstands lehnt ein Repo mit diesem Wert ab, und `bun install` führt kein Skript aus.
 
-- `bun install` führt `prepare` aus (`skripte/hooks-setzen.sh`) und setzt `core.hooksPath` dieses Klons auf `.githooks`, nur lokal, nie global. Der Hook `.githooks/pre-commit` läuft `bun run bau` und nimmt `dist/server.js` in den Commit auf. Ein Klon ohne `bun install` hat den Hook nicht, dort fängt der Test es ab.
 - `test/dist.test.ts` baut in einen Temp-Ordner und vergleicht mit `dist/server.js`. Rot heißt "dist ist veraltet, bun run bau". Der Bau ist deterministisch bis auf den absoluten Checkout-Pfad in zwei `__dirname`-Zeilen (pino, thread-stream), den der Test vor dem Vergleich ausblendet. Ein Commit aus einem anderen Ordner ändert diese zwei Zeilen im Bundle, das ist erwartet.
 
 ## Namenskollision

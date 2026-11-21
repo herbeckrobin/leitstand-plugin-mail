@@ -1,6 +1,6 @@
 # Changelog
 
-- Unveröffentlicht: `test/dist.test.ts` baut den Quelltext in einen Temp-Ordner und vergleicht mit `dist/server.js` ("dist ist veraltet, bun run bau"). Pre-commit-Hook `.githooks/pre-commit` baut und nimmt `dist/server.js` mit, `bun install` setzt ihn per `prepare` (nur lokales `core.hooksPath`) (A-2310).
+- Unveröffentlicht: `test/dist.test.ts` baut den Quelltext in einen Temp-Ordner und vergleicht mit `dist/server.js` ("dist ist veraltet, bun run bau"). Kein Git-Hook und kein `prepare`: das Repo setzt keinen Git-Config-Wert, `git_push` des Leitstands lehnt `core.hooksPath` ab (A-2310, A-2322).
 
 - 1.2.3: `signatur_text` allein gilt als Signatur. Vorher gab `leseSignatur` ohne `signatur_html` nichts zurück und der Entwurf hatte keinen Gruß (A-2307).
 - 1.2.2: Die `beschreibung` in der plugin.yml war mit über 400 Zeichen zu lang, der Kern lehnte das Plugin ab (A-2292). Sie ist gekürzt, ebenso der Titel der Einstellung `konten` (höchstens 80). `test/pluginyml.test.ts` prüft jetzt alle Grenzen des Kerns (`server/module/plugin-yml.ts`) und nicht nur das Parsen.
