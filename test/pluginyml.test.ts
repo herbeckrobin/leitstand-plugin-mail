@@ -16,6 +16,10 @@ const SCHLUESSEL = [
   'start',
   'dauer',
   'ereignisse',
+  'roh',
+  'takt',
+  'aktionen',
+  'hinweise',
   'werkzeuge',
   'rules',
   'rechte',
@@ -40,10 +44,15 @@ const WERKZEUGE = [
   'entwurf_loeschen',
   'verschieben',
   'triage_merke',
+  'takt',
   'anhang_speichern',
 ];
+// Felder aus dem Vertrag mit dem Kern (A-2282): leseYml auf main kennt takt, aktionen, hinweise, roh und
+// nur_dienst erst mit dem Kern-Merge, darum prüft dieser Test sie gegen den Vertrag und nicht gegen leseYml.
+const AKTIONEN = ['karte_neu', 'karte_erledige', 'stoerung', 'vermerk', 'modell'];
+const TAKT_KONTEXT = ['klappe', 'karten', 'aufgaben', 'modell'];
 
-type Werkzeug = { art: string; stufe: string; text: string; hinweis?: string };
+type Werkzeug = { art: string; stufe: string; text: string; hinweis?: string; nur_dienst?: boolean };
 type Einstellung = { typ: string; titel: string; geheim?: boolean; pflicht?: boolean; standard?: unknown };
 type Roh = {
   name: unknown;
@@ -53,6 +62,10 @@ type Roh = {
   start: unknown[];
   dauer: unknown;
   ereignisse: unknown[];
+  roh: unknown[];
+  takt: { werkzeug: unknown; sekunden: unknown; kontext: unknown[] };
+  aktionen: unknown[];
+  hinweise: Record<string, unknown>;
   werkzeuge: Record<string, Werkzeug>;
   rules: unknown[];
   rechte: { lesen: string[]; schreiben: string[]; netz: string[] };
@@ -129,6 +142,50 @@ describe('plugin.yml mit dem Parser des Kerns', () => {
   });
 });
 
+describe('Takt, Aktionen, Hinweise und roh (Vertrag mit dem Kern)', () => {
+  test('takt: werkzeug zeigt auf ein Werkzeug, sekunden ganze Zahl 10 bis 3600, kontext aus der Liste', () => {
+    expect(Object.keys(roh.werkzeuge)).toContain(roh.takt.werkzeug as string);
+    expect(roh.takt.werkzeug).toBe('takt');
+    expect(Number.isInteger(roh.takt.sekunden)).toBe(true);
+    expect(roh.takt.sekunden as number).toBeGreaterThanOrEqual(10);
+    expect(roh.takt.sekunden as number).toBeLessThanOrEqual(3600);
+    for (const k of roh.takt.kontext) expect(TAKT_KONTEXT).toContain(k as string);
+    expect(new Set(roh.takt.kontext).size).toBe(roh.takt.kontext.length);
+  });
+
+  test('takt ist ein Dienst-Werkzeug: nur_dienst, art schreiben, stufe frei, nie als lesen für Rollen', () => {
+    const w = roh.werkzeuge.takt!;
+    expect(w.nur_dienst).toBe(true);
+    expect(w.art).toBe('schreiben');
+    expect(w.stufe).toBe('frei');
+    // Kein anderes Werkzeug trägt nur_dienst.
+    for (const [name, x] of Object.entries(roh.werkzeuge)) if (name !== 'takt') expect(x.nur_dienst, name).toBeUndefined();
+  });
+
+  test('aktionen: höchstens die fünf bekannten Arten, ohne Doppelte', () => {
+    expect(roh.aktionen.length).toBeGreaterThanOrEqual(1);
+    for (const a of roh.aktionen) expect(AKTIONEN).toContain(a as string);
+    expect(new Set(roh.aktionen).size).toBe(roh.aktionen.length);
+  });
+
+  test('roh ist Teilmenge von ereignisse', () => {
+    for (const a of roh.roh) expect(roh.ereignisse).toContain(a);
+  });
+
+  test('hinweise: Art steht in ereignisse, Datei relativ, UTF-8, höchstens 4000 Zeichen', () => {
+    for (const [art, datei] of Object.entries(roh.hinweise)) {
+      expect(roh.ereignisse).toContain(art);
+      expect(text(datei, 300)).toBe(true);
+      const p = datei as string;
+      expect(p.startsWith('/')).toBe(false);
+      expect(p.split('/')).not.toContain('..');
+      const inh = readFileSync(join(import.meta.dir, '..', p), 'utf8');
+      expect(inh.length).toBeGreaterThan(0);
+      expect(inh.length).toBeLessThanOrEqual(4000);
+    }
+  });
+});
+
 describe('Werkzeuge', () => {
   test('höchstens 100, genau die erwarteten', () => {
     const namen = Object.keys(roh.werkzeuge);
@@ -179,5 +236,10 @@ describe('Einstellungen', () => {
       if (e.pflicht !== undefined) expect(typeof e.pflicht, `${name}.pflicht`).toBe('boolean');
       if (e.geheim === true) expect(e.standard, `${name}: geheim ohne standard`).toBeUndefined();
     }
+  });
+
+  test('Triage-Einstellungen: Typ und Vorgabe, wie server.ts sie liest', () => {
+    expect(roh.einstellungen.triage_an).toMatchObject({ typ: 'boolean', standard: false });
+    expect(roh.einstellungen.triage_takt_min).toMatchObject({ typ: 'number', standard: 10 });
   });
 });

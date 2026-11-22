@@ -243,7 +243,8 @@ describe('Protokoll und Werkzeuge', () => {
     const yml = readFileSync(join(import.meta.dir, '..', 'plugin.yml'), 'utf8');
     // Nur der Block werkzeuge: (bis rechte:), sonst zählt rechte.lesen als Werkzeug lesen.
     const block = yml.slice(yml.indexOf('\nwerkzeuge:'), yml.indexOf('\nrechte:'));
-    const imYml = [...block.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]!);
+    // takt kommt aus takt.ts (braucht den laufenden Prozess), nicht aus mailWerkzeuge: sein Gegenstück prüft test/takt.test.ts.
+    const imYml = [...block.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]!).filter((n) => n !== 'takt');
     expect(imYml.sort()).toEqual(defs().map((d) => d.name).sort());
   });
 

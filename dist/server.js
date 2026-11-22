@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-distfrisch/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailtakt/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-distfrisch/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailtakt/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -32495,8 +32495,8 @@ var require_mailsplit = __commonJS((exports, module) => {
 });
 
 // server.ts
-import { mkdirSync as mkdirSync2 } from "fs";
-import { join as join3 } from "path";
+import { mkdirSync as mkdirSync4 } from "fs";
+import { join as join4 } from "path";
 
 // node_modules/imapflow/dist/esm/imap-flow.js
 import tls2 from "tls";
@@ -45882,15 +45882,632 @@ function sichererName(n) {
   return s || "anhang";
 }
 
+// signal.ts
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { dirname as dirname2 } from "path";
+var PUFFER_DATEI = "mailsignal-puffer.json";
+var NACHHOL_DATEI = "mailsignal-nachhol.json";
+function nachholText(n) {
+  return `<channel source="mailsignal" anzahl="${n}" alt="1">${n === 1 ? "1 liegengebliebene Mail" : `${n} liegengebliebene Mails`} (\xE4lter als 24 h)</channel>`;
+}
+function signalText(e, gesammelt) {
+  const attr = [];
+  let content;
+  const nurUnbekannt = e.unbekannt === true && e.anzahl === 0 && e.gesendet === 0;
+  if (nurUnbekannt) {
+    content = "neue Mail, Anzahl unbekannt";
+  } else {
+    const eingang = e.anzahl === 1 ? "1 neue Mail" : `${e.anzahl} neue Mails`;
+    attr.push(` anzahl="${e.anzahl}"`);
+    content = eingang;
+    if (e.gesendet > 0) {
+      attr.push(` gesendet="${e.gesendet}"`);
+      content = e.anzahl === 0 ? e.gesendet === 1 ? "1 Mail gesendet" : `${e.gesendet} Mails gesendet` : `${eingang}, ${e.gesendet} gesendet`;
+    }
+    if (e.unbekannt)
+      content += ", dazu neue Mails ohne Zahl";
+  }
+  if (e.unbekannt)
+    attr.push(' unbekannt="1"');
+  if (gesammelt) {
+    attr.push(' gesammelt="1"');
+    content += " (gesammelt bei zugeklapptem Laptop)";
+  }
+  return `<channel source="mailsignal"${attr.join("")}>${content}</channel>`;
+}
+var zahl = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 0;
+function schreibeAtomar(pfad, inhalt) {
+  mkdirSync(dirname2(pfad), { recursive: true });
+  writeFileSync(`${pfad}.neu`, JSON.stringify(inhalt));
+  renameSync(`${pfad}.neu`, pfad);
+}
+
+class MailSignal {
+  ort;
+  nachholSpeicher = null;
+  puffer = { anzahl: 0, gesendet: 0, unbekannt: false, gesammelt: false };
+  stand = { letzterLauf: null, zugestellt: 0 };
+  constructor(ort) {
+    this.ort = ort;
+    this.ladePuffer();
+  }
+  ladePuffer() {
+    if (!this.ort.pufferDatei)
+      return;
+    try {
+      const j = JSON.parse(readFileSync(this.ort.pufferDatei, "utf8"));
+      const unbekannt = j.unbekannt === true;
+      this.puffer = { anzahl: zahl(j.anzahl), gesendet: zahl(j.gesendet), unbekannt, gesammelt: j.gesammelt === true || zahl(j.anzahl) + zahl(j.gesendet) > 0 || unbekannt };
+    } catch {}
+  }
+  schreibePuffer() {
+    if (!this.ort.pufferDatei)
+      return;
+    try {
+      schreibeAtomar(this.ort.pufferDatei, this.puffer);
+    } catch {}
+  }
+  melde(neu = { anzahl: 0, gesendet: 0 }, jetzt = Date.now()) {
+    const hatNeues = neu.anzahl + neu.gesendet > 0 || neu.unbekannt === true;
+    this.puffer.anzahl += neu.anzahl;
+    this.puffer.gesendet += neu.gesendet;
+    if (neu.unbekannt)
+      this.puffer.unbekannt = true;
+    if (this.puffer.anzahl + this.puffer.gesendet === 0 && !this.puffer.unbekannt)
+      return;
+    if (hatNeues) {
+      this.stand.letzterLauf = jetzt;
+      this.schreibePuffer();
+    }
+    if (this.ort.zugeklappt()) {
+      this.puffer.gesammelt = true;
+      this.schreibePuffer();
+      return;
+    }
+    if (this.ort.zustellen(signalText(this.puffer, this.puffer.gesammelt))) {
+      this.stand.zugestellt++;
+      this.puffer = { anzahl: 0, gesendet: 0, unbekannt: false, gesammelt: false };
+      this.schreibePuffer();
+    }
+  }
+  meldeAlt(n, jetzt = Date.now()) {
+    if (n <= 0 || this.ort.zugeklappt())
+      return false;
+    const an = this.ort.empfaenger?.() ?? "chef";
+    const alt = this.leseNachholStand();
+    if (alt && alt.an === an && alt.n === n && jetzt - alt.am < 24 * 60 * 60 * 1000)
+      return false;
+    if (!this.ort.zustellen(nachholText(n)))
+      return false;
+    this.stand.zugestellt++;
+    this.nachholSpeicher = { n, am: jetzt, an };
+    if (this.ort.nachholStand) {
+      try {
+        schreibeAtomar(this.ort.nachholStand, { n, am: jetzt, an });
+      } catch {}
+    }
+    return true;
+  }
+  leseNachholStand() {
+    if (!this.ort.nachholStand)
+      return this.nachholSpeicher;
+    try {
+      const j = JSON.parse(readFileSync(this.ort.nachholStand, "utf8"));
+      return typeof j.n === "number" && typeof j.am === "number" ? { n: j.n, am: j.am, an: typeof j.an === "string" ? j.an : "chef" } : null;
+    } catch {
+      return null;
+    }
+  }
+  gepuffert() {
+    return { anzahl: this.puffer.anzahl, gesendet: this.puffer.gesendet, unbekannt: this.puffer.unbekannt };
+  }
+}
+
+// takt.ts
+import { existsSync, mkdirSync as mkdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
+import { dirname as dirname3, join as join2 } from "path";
+
+// typen.ts
+class WerkzeugFehler extends Error {
+}
+
+class Strukturiert {
+  text;
+  struktur;
+  constructor(text2, struktur) {
+    this.text = text2;
+    this.struktur = struktur;
+  }
+}
+
+// takt.ts
+var TRIAGE_STAND_DATEI = "mailtriage-stand.json";
+var TRIAGE_TITEL = "Mail-Triage:";
+var MAX_AKTIONEN = 20;
+var MAX_MODELL_JE_TAKT = 3;
+var MAIL_JE_ANFRAGE = 20;
+var MODELL_WARTE_MS = 5 * 60 * 1000;
+var NACHHOL_TAKT_MS = 60 * 60 * 1000;
+var ENTWURF_PAUSE_MS = 60 * 1000;
+var kuerze = (s, n) => s.length > n ? s.slice(0, n) : s;
+var text2 = (v) => typeof v === "string" ? v : null;
+var objekt = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : null;
+function leseEingabe(a) {
+  const jetzt = typeof a.jetzt === "string" ? Date.parse(a.jetzt) : NaN;
+  if (Number.isNaN(jetzt))
+    throw new WerkzeugFehler("jetzt fehlt oder ist kein Zeitpunkt");
+  const liste = (v) => Array.isArray(v) ? v : [];
+  const karten = [];
+  for (const k of liste(a.karten)) {
+    const o = objekt(k);
+    if (!o || typeof o.id !== "string")
+      continue;
+    const e = objekt(o.entwurf);
+    const art = e?.art === "neu" ? "neu" : "antwort";
+    karten.push({
+      id: o.id,
+      typ: text2(o.typ) ?? "",
+      titel: text2(o.titel) ?? "",
+      entwurf: e && typeof e.konto === "string" ? { konto: e.konto, uuid: text2(e.uuid) || null, uid: typeof e.uid === "number" ? e.uid : null, art } : null
+    });
+  }
+  const aufgaben = [];
+  for (const k of liste(a.aufgaben)) {
+    const o = objekt(k);
+    if (!o)
+      continue;
+    aufgaben.push({
+      aId: text2(o.a_id) ?? "",
+      titel: text2(o.titel) ?? "",
+      ball: text2(o.ball),
+      kunde: text2(o.kunde),
+      projekt: text2(o.projekt),
+      faellig: text2(o.faellig),
+      offen: o.offen !== false
+    });
+  }
+  const modell = [];
+  for (const k of liste(a.modell)) {
+    const o = objekt(k);
+    if (!o || typeof o.id !== "string")
+      continue;
+    if (typeof o.ergebnis === "string")
+      modell.push({ id: o.id, ergebnis: o.ergebnis });
+    else
+      modell.push({ id: o.id, fehler: text2(o.fehler) ?? "fehler" });
+  }
+  return { jetzt, klappeZu: objekt(a.klappe)?.zu === true, karten, aufgaben, modell };
+}
+var anzeigeName = (m) => m.von || m.adresse || "(ohne Absender)";
+var mailSchluessel = (m) => `${m.konto}|${m.uid}`;
+function leseMail(konto, n) {
+  const o = objekt(n);
+  if (!o || typeof o.uid !== "number")
+    return null;
+  const von = objekt(Array.isArray(o.von) ? o.von[0] : null);
+  const mail = { konto, uid: o.uid, von: (text2(von?.name) ?? "").trim(), adresse: (text2(von?.adresse) ?? "").trim(), betreff: (text2(o.betreff) ?? "").trim() };
+  return mail.adresse || mail.betreff ? mail : null;
+}
+var norm = (s) => s.toLowerCase().normalize("NFKD").replace(/\p{M}/gu, "").replace(/\s+/g, " ");
+var kommtVor = (heu, name2) => {
+  const n = norm(name2.trim());
+  const i = heu.indexOf(n);
+  if (i < 0)
+    return false;
+  const vor = heu[i - 1];
+  const nach = heu[i + n.length];
+  return !(vor && /[\p{L}\p{N}]/u.test(vor)) && !(nach && /[\p{L}\p{N}]/u.test(nach));
+};
+var morgenIso = (jetzt) => new Date(jetzt + 24 * 3600000).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+function regelUrteil(m, aufgaben, jetzt) {
+  const heu = norm(`${m.von} ${m.adresse} ${m.betreff}
+`);
+  let bester = null;
+  const gesehen = new Set;
+  for (const a of aufgaben) {
+    const k = `${a.kunde}|${a.projekt}`;
+    if (gesehen.has(k))
+      continue;
+    gesehen.add(k);
+    for (const [name2, projekt] of [[a.projekt, true], [a.kunde, false]]) {
+      if (!name2 || name2.trim().length < 3 || !kommtVor(heu, name2))
+        continue;
+      const rang = (projekt ? 1000 : 0) + name2.length;
+      if (!bester || rang > bester.rang)
+        bester = { kunde: a.kunde, projekt: projekt ? a.projekt : null, rang };
+    }
+  }
+  if (!bester)
+    return null;
+  const t = bester;
+  const imTreffer = (a) => a.kunde === t.kunde && (t.projekt === null || a.projekt === t.projekt);
+  if (aufgaben.some((a) => a.offen && a.ball !== null && /(^|[^\p{L}])robin([^\p{L}]|$)/iu.test(a.ball) && imTreffer(a)))
+    return "braucht";
+  const morgen = morgenIso(jetzt);
+  return aufgaben.some((a) => a.offen && a.faellig !== null && a.faellig <= morgen && imTreffer(a)) ? "braucht" : null;
+}
+var TRIAGE_SYSTEM = [
+  "Du sortierst eingehende Mails eines Freelance-Webentwicklers. Du siehst nur Absender und Betreff.",
+  "Antworte mit braucht=true, wenn die Mail wahrscheinlich eine Antwort, Entscheidung oder Handlung von ihm verlangt:",
+  "Kundenanfrage, Frage, Terminwunsch, Freigabe, Fehlermeldung, Rechnung oder Mahnung an ihn, Frist.",
+  "Antworte mit braucht=false bei Newslettern, Werbung, automatischen Benachrichtigungen, Best\xE4tigungen und Quittungen ohne Handlung.",
+  "Im Zweifel braucht=true."
+].join(" ");
+function modellPrompt(mails) {
+  const zeilen = mails.map((m, i) => `${i + 1}. Absender: ${anzeigeName(m)} <${m.adresse}> | Betreff: ${m.betreff.slice(0, 300).replace(/\s+/g, " ")}`);
+  return [TRIAGE_SYSTEM, 'Beurteile jede Mail einzeln. Antworte nur mit einem JSON-Array, je Mail ein Objekt: [{"n":1,"braucht":true}, ...].', ...zeilen].join(`
+`);
+}
+function leseUrteile(roh) {
+  const aus = new Map;
+  const m = /\[[\s\S]*\]/.exec(roh);
+  if (!m)
+    return aus;
+  try {
+    const j = JSON.parse(m[0]);
+    if (!Array.isArray(j))
+      return aus;
+    for (const e of j) {
+      const o = objekt(e);
+      if (o && typeof o.n === "number" && Number.isInteger(o.n) && (o.braucht === true || o.braucht === false))
+        aus.set(o.n, o.braucht ? "braucht" : "warten");
+    }
+  } catch {}
+  return aus;
+}
+var MAX_ZEILEN = 20;
+var zeile = (m) => `- ${anzeigeName(m)}: ${m.betreff || "(ohne Betreff)"}`.replace(/\s*\n\s*/g, " ");
+function block(titel, l) {
+  if (l.length === 0)
+    return [];
+  const aus = [`${titel}:`, ...l.slice(0, MAX_ZEILEN).map((e) => zeile(e.mail))];
+  if (l.length > MAX_ZEILEN)
+    aus.push(`- und ${l.length - MAX_ZEILEN} weitere`);
+  return aus;
+}
+function triageKarte(schluessel, e, ausgelassen) {
+  const braucht = e.filter((x) => x.urteil === "braucht");
+  const warten = e.filter((x) => x.urteil === "warten");
+  const ohne = braucht.filter((x) => x.grund === "rueckfall").length;
+  const alle = block("Brauchen dich", braucht);
+  if (ohne > 0)
+    alle.push(`${ohne} davon ohne Einordnung (Modell nicht erreichbar oder zu langsam), sicherheitshalber hier.`);
+  if (ausgelassen > 0)
+    alle.push(`${ausgelassen} weitere nicht eingeordnet, im Postfach ansehen.`);
+  const kontext = alle.slice(0, 10).map((z) => kuerze(z, 300));
+  const details = [...alle.slice(10), ...block("K\xF6nnen warten", warten)].join(`
+`);
+  return { art: "karte_neu", schluessel, typ: "info", titel: kuerze(`${TRIAGE_TITEL} ${braucht.length + ausgelassen} brauchen dich, ${warten.length} k\xF6nnen warten`, 200), kontext, details: kuerze(details, 4000) };
+}
+var URTEILE = ["braucht", "warten"];
+var GRUENDE = ["regel", "modell", "rueckfall"];
+function leseMailFeld(v) {
+  const m = objekt(v);
+  if (!m || typeof m.konto !== "string" || typeof m.uid !== "number" || typeof m.von !== "string" || typeof m.adresse !== "string" || typeof m.betreff !== "string")
+    return null;
+  return { konto: m.konto, uid: m.uid, von: m.von, adresse: m.adresse, betreff: m.betreff };
+}
+function leseEinordnung(v) {
+  const o = objekt(v);
+  const mail = leseMailFeld(o?.mail);
+  if (!o || !mail || !URTEILE.includes(o.urteil) || !GRUENDE.includes(o.grund))
+    return null;
+  return { mail, urteil: o.urteil, grund: o.grund };
+}
+var leerStand = () => ({ staende: new Map, sammlung: { einordnungen: [], ausgelassen: 0, seit: 0 }, wartet: [] });
+function ladeStand(pfad) {
+  const s = leerStand();
+  if (!existsSync(pfad))
+    return s;
+  try {
+    const j = objekt(JSON.parse(readFileSync2(pfad, "utf8")));
+    for (const [k, v] of Object.entries(objekt(j?.staende) ?? {})) {
+      const o = objekt(v);
+      if (o && typeof o.uidNext === "number" && typeof o.uidValidity === "string")
+        s.staende.set(k, { uidNext: o.uidNext, uidValidity: o.uidValidity });
+    }
+    const sam = objekt(j?.sammlung);
+    if (sam && Array.isArray(sam.einordnungen)) {
+      s.sammlung = {
+        einordnungen: sam.einordnungen.map(leseEinordnung).filter((e) => e !== null),
+        ausgelassen: typeof sam.ausgelassen === "number" && sam.ausgelassen > 0 ? Math.floor(sam.ausgelassen) : 0,
+        seit: typeof sam.seit === "number" ? sam.seit : 0
+      };
+    }
+    for (const w of Array.isArray(j?.wartet) ? j.wartet : []) {
+      const o = objekt(w);
+      if (!o || typeof o.id !== "string" || typeof o.bestellt !== "number" || !Array.isArray(o.mails))
+        continue;
+      s.wartet.push({ id: o.id, bestellt: o.bestellt, mails: o.mails.map(leseMailFeld).filter((m) => m !== null) });
+    }
+  } catch {}
+  return s;
+}
+function speichereStand(pfad, s) {
+  try {
+    mkdirSync2(dirname3(pfad), { recursive: true });
+    const zwischen = `${pfad}.${process.pid}.neu`;
+    writeFileSync2(zwischen, JSON.stringify({ staende: Object.fromEntries(s.staende), sammlung: s.sammlung, wartet: s.wartet }), { mode: 384 });
+    renameSync2(zwischen, pfad);
+    return true;
+  } catch {
+    return false;
+  }
+}
+var TOLERANZ_MS = 5 * 60 * 1000;
+var RE = /^\s*((re|aw|fwd?|wg)\s*:\s*)+/i;
+var normBetreff = (b) => {
+  let s = b.trim();
+  for (;; ) {
+    const n = s.replace(RE, "");
+    if (n === s)
+      break;
+    s = n;
+  }
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
+};
+function istAbgeschickt(art, entwurf, gesendet) {
+  if (entwurf.datum !== null && gesendet.datum !== null && gesendet.datum < entwurf.datum - TOLERANZ_MS)
+    return false;
+  if (entwurf.messageId && gesendet.messageId && entwurf.messageId === gesendet.messageId)
+    return true;
+  const gemeinsam = entwurf.empfaenger.some((a) => gesendet.empfaenger.includes(a));
+  if (art === "antwort")
+    return !!entwurf.inReplyTo && entwurf.inReplyTo === gesendet.inReplyTo && gemeinsam;
+  if (!entwurf.empfaenger.length || normBetreff(entwurf.betreff) !== normBetreff(gesendet.betreff))
+    return false;
+  return entwurf.empfaenger.every((a) => gesendet.empfaenger.includes(a));
+}
+var adressen = (v) => [...new Set((Array.isArray(v) ? v : []).map((p) => (text2(objekt(p)?.adresse) ?? "").trim().toLowerCase()).filter(Boolean))];
+var datumMs = (v) => {
+  const t = typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isNaN(t) ? null : t;
+};
+var kopfAus = (k) => ({
+  messageId: text2(k.message_id),
+  inReplyTo: text2(k.in_reply_to),
+  betreff: text2(k.betreff) ?? "",
+  empfaenger: [...new Set([...adressen(k.an), ...adressen(k.cc)])],
+  datum: datumMs(k.datum)
+});
+
+class MailTakt {
+  ort;
+  nachholLetzter = 0;
+  nachholGerade = false;
+  triageLetzter = 0;
+  stand = null;
+  kopfe = new Map;
+  geprueft = new Map;
+  gestoert = new Set;
+  laeuft = false;
+  constructor(ort) {
+    this.ort = ort;
+  }
+  standPfad = () => join2(this.ort.daten, TRIAGE_STAND_DATEI);
+  lade() {
+    return this.stand ??= ladeStand(this.standPfad());
+  }
+  async lauf(roh) {
+    const e = leseEingabe(roh);
+    if (this.laeuft)
+      return { aktionen: [] };
+    this.laeuft = true;
+    try {
+      this.ort.klappe.zu = e.klappeZu;
+      this.ort.signal.melde(undefined, e.jetzt);
+      if (!e.klappeZu && e.jetzt - this.nachholLetzter >= NACHHOL_TAKT_MS && !this.nachholGerade)
+        this.nachholLauf(e.jetzt);
+      const stoerungen = [];
+      const erledigt = await this.entwurfPruefer(e, stoerungen);
+      const triage = await this.triage(e, stoerungen);
+      const modell = triage.filter((a) => a.art === "modell").slice(0, MAX_MODELL_JE_TAKT);
+      const rest = triage.filter((a) => a.art !== "modell");
+      return { aktionen: [...stoerungen, ...erledigt, ...rest, ...modell].slice(0, MAX_AKTIONEN) };
+    } finally {
+      this.laeuft = false;
+    }
+  }
+  async nachholLauf(jetzt) {
+    this.nachholGerade = true;
+    this.nachholLetzter = jetzt;
+    try {
+      const r = await this.ort.rufe("nachhol_zaehle", {});
+      if (typeof r.anzahl === "number")
+        this.ort.signal.meldeAlt(r.anzahl);
+      else
+        this.ort.log("Nachholen: ein Konto war nicht lesbar, kein Hinweis");
+    } catch (e) {
+      this.ort.log(`Nachholen: ${e instanceof Error ? e.name : "Fehler"}`);
+    } finally {
+      this.nachholGerade = false;
+    }
+  }
+  async entwurfPruefer(e, stoerungen) {
+    const offen = e.karten.filter((k) => k.typ === "review" && k.entwurf !== null);
+    const ids = new Set(offen.map((k) => k.id));
+    for (const id2 of [...this.kopfe.keys()])
+      if (!ids.has(id2))
+        this.kopfe.delete(id2);
+    for (const id2 of [...this.geprueft.keys()])
+      if (!ids.has(id2))
+        this.geprueft.delete(id2);
+    const aus = [];
+    for (const k of offen) {
+      if (e.jetzt - (this.geprueft.get(k.id) ?? 0) < ENTWURF_PAUSE_MS)
+        continue;
+      this.geprueft.set(k.id, e.jetzt);
+      try {
+        const a = await this.pruefeKarte(k);
+        if (a)
+          aus.push(a);
+        for (const s of [...this.gestoert])
+          if (s.startsWith(`${k.id}|`))
+            this.gestoert.delete(s);
+      } catch (err) {
+        const s = `${k.id}|${err instanceof Error ? err.name : "Fehler"}`;
+        this.ort.log(`Entwurf-Pr\xFCfung ${k.id}: ${err instanceof Error ? err.name : "Fehler"}`);
+        if (!this.gestoert.has(s)) {
+          this.gestoert.add(s);
+          stoerungen.push({ art: "stoerung", stelle: "mail.entwurf", text: kuerze(`Entwurf-Pr\xFCfung f\xFCr Karte ${k.id} fehlgeschlagen (${err instanceof Error ? err.name : "Fehler"})`, 300) });
+        }
+      }
+    }
+    return aus;
+  }
+  async pruefeKarte(k) {
+    const ref = k.entwurf;
+    if (!ref.uuid && ref.uid === null)
+      return null;
+    const r = await this.ort.rufe("entwurf_finde", { konto: ref.konto, ...ref.uuid ? { uuid: ref.uuid } : { uid: ref.uid } });
+    const ent = objekt(r.entwurf);
+    const e = r.gefunden === true && ent && (ref.uuid || Array.isArray(ent.flags) && ent.flags.includes("\\Draft")) ? ent : null;
+    if (e)
+      this.kopfe.set(k.id, kopfAus(e));
+    const gemerkt = this.kopfe.get(k.id);
+    let gefunden = null;
+    if (gemerkt) {
+      const suche = ref.art === "antwort" && gemerkt.inReplyTo ? { in_reply_to: gemerkt.inReplyTo } : gemerkt.betreff ? { betreff: gemerkt.betreff.replace(RE, ""), ...gemerkt.datum ? { seit_ms: gemerkt.datum - 86400000 } : {} } : null;
+      if (suche) {
+        const g = await this.ort.rufe("gesendet_finde", { konto: ref.konto, ...suche });
+        if (g.ordner === null)
+          return null;
+        const treffer = (Array.isArray(g.mails) ? g.mails : []).map((m) => kopfAus(objekt(m) ?? {})).filter((x) => istAbgeschickt(ref.art, gemerkt, x));
+        gefunden = treffer.sort((a, b) => (b.datum ?? 0) - (a.datum ?? 0))[0] ?? null;
+      }
+    } else if (!e && ref.uuid) {
+      const g = await this.ort.rufe("gesendet_finde", { konto: ref.konto, uuid: ref.uuid });
+      if (g.ordner === null)
+        return null;
+      gefunden = (Array.isArray(g.mails) ? g.mails : []).map((m) => kopfAus(objekt(m) ?? {})).sort((a, b) => (b.datum ?? 0) - (a.datum ?? 0))[0] ?? null;
+    }
+    if (!gefunden?.messageId)
+      return null;
+    this.kopfe.delete(k.id);
+    return { art: "karte_erledige", id: k.id, beleg: kuerze(gefunden.messageId, 200) };
+  }
+  async triage(e, stoerungen) {
+    const einst = this.ort.triage();
+    const s = this.lade();
+    const aus = [];
+    const karteOffen = e.karten.some((k) => k.titel.startsWith(TRIAGE_TITEL));
+    let schmutzig = false;
+    let geaendert = false;
+    if (!karteOffen && (s.sammlung.einordnungen.length > 0 || s.sammlung.ausgelassen > 0)) {
+      s.sammlung = { einordnungen: [], ausgelassen: 0, seit: 0 };
+      schmutzig = true;
+    }
+    const aufnehmen = (neu, ausgelassen = 0) => {
+      if (neu.length === 0 && ausgelassen === 0)
+        return;
+      if (s.sammlung.einordnungen.length === 0 && s.sammlung.ausgelassen === 0)
+        s.sammlung.seit = e.jetzt;
+      const bekannt = new Set(neu.map((x) => mailSchluessel(x.mail)));
+      s.sammlung.einordnungen = [...s.sammlung.einordnungen.filter((x) => !bekannt.has(mailSchluessel(x.mail))), ...neu];
+      s.sammlung.ausgelassen += ausgelassen;
+      schmutzig = true;
+      geaendert = true;
+    };
+    const ergebnisse = new Map(e.modell.map((m) => [m.id, m]));
+    const bleibt = [];
+    for (const w of s.wartet) {
+      const r = ergebnisse.get(w.id);
+      if (!r && e.jetzt - w.bestellt < MODELL_WARTE_MS) {
+        bleibt.push(w);
+        continue;
+      }
+      const urteile = r && "ergebnis" in r ? leseUrteile(r.ergebnis) : new Map;
+      aufnehmen(w.mails.map((m, i) => {
+        const u = urteile.get(i + 1);
+        return u ? { mail: m, urteil: u, grund: "modell" } : { mail: m, urteil: "braucht", grund: "rueckfall" };
+      }));
+      schmutzig = true;
+    }
+    if (bleibt.length !== s.wartet.length)
+      s.wartet = bleibt;
+    let lauf = null;
+    if (einst.an && e.jetzt - this.triageLetzter >= einst.taktMin * 60000) {
+      this.triageLetzter = e.jetzt;
+      lauf = { neu: 0, ausgelassen: 0, fehler: 0, modell: 0 };
+      const mails = [];
+      const neueStaende = new Map;
+      let ausgelassen = 0;
+      for (const konto of this.ort.konten()) {
+        try {
+          const alt = s.staende.get(konto);
+          const r = await this.ort.rufe("neue_seit", { konto, ...alt ? { uid_next: alt.uidNext, uid_validity: alt.uidValidity } : {} });
+          const st = objekt(r.stand);
+          if (!st || typeof st.uid_next !== "number" || typeof st.uid_validity !== "string")
+            throw new Error("Stand fehlt");
+          neueStaende.set(konto, { uidNext: st.uid_next, uidValidity: st.uid_validity });
+          for (const n of Array.isArray(r.mails) ? r.mails : []) {
+            const m = leseMail(konto, n);
+            if (m)
+              mails.push(m);
+          }
+          ausgelassen += typeof r.ausgelassen === "number" ? r.ausgelassen : 0;
+        } catch {
+          lauf.fehler++;
+        }
+      }
+      lauf.neu = mails.length;
+      const regel = [];
+      const rest = [];
+      for (const m of mails)
+        regelUrteil(m, e.aufgaben, e.jetzt) ? regel.push({ mail: m, urteil: "braucht", grund: "regel" }) : rest.push(m);
+      const platz = MAX_MODELL_JE_TAKT * MAIL_JE_ANFRAGE;
+      const bestellt = rest.slice(0, platz);
+      ausgelassen += Math.max(0, rest.length - platz);
+      for (let i = 0;i < bestellt.length; i += MAIL_JE_ANFRAGE) {
+        const teil = bestellt.slice(i, i + MAIL_JE_ANFRAGE);
+        const id2 = `triage-${e.jetzt}-${i / MAIL_JE_ANFRAGE}`;
+        s.wartet.push({ id: id2, bestellt: e.jetzt, mails: teil });
+        aus.push({ art: "modell", id: id2, prompt: kuerze(modellPrompt(teil), 8000), max_zeichen: 4000 });
+        lauf.modell++;
+      }
+      lauf.ausgelassen = ausgelassen;
+      aufnehmen(regel, ausgelassen);
+      for (const [k, st] of neueStaende) {
+        const alt = s.staende.get(k);
+        if (!alt || alt.uidNext !== st.uidNext || alt.uidValidity !== st.uidValidity)
+          schmutzig = true;
+        s.staende.set(k, st);
+      }
+      schmutzig = true;
+    }
+    if (schmutzig && !speichereStand(this.standPfad(), s)) {
+      this.ort.log("mailtriage Stand nicht gespeichert");
+      stoerungen.push({ art: "stoerung", stelle: "mail.triage", text: "Triage-Stand lie\xDF sich nicht speichern" });
+    }
+    if (geaendert)
+      aus.push(triageKarte(`mail-triage-${s.sammlung.seit}`, s.sammlung.einordnungen, s.sammlung.ausgelassen));
+    if (lauf)
+      this.ort.log(`mailtriage ${new Date(e.jetzt).toISOString()} lauf neu=${lauf.neu} ausgelassen=${lauf.ausgelassen} modell=${lauf.modell} fehler=${lauf.fehler}`);
+    return aus;
+  }
+}
+function taktWerkzeug(takt) {
+  return {
+    name: "takt",
+    beschreibung: "Takt des Kerns: Triage, Entwurf-Pr\xFCfer, Nachholen. Antwortet mit Aktionen, die der Kern ausf\xFChrt. Nur der Kern ruft es.",
+    schema: {
+      type: "object",
+      properties: { jetzt: { type: "string" }, klappe: { type: "object" }, karten: { type: "array" }, aufgaben: { type: "array" }, modell: { type: "array" }, vermerke: { type: "object" } },
+      required: ["jetzt"]
+    },
+    aufruf: (a) => takt.lauf(a)
+  };
+}
+
 // triage.ts
-import { readFileSync, renameSync, writeFileSync } from "fs";
+import { readFileSync as readFileSync3, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "fs";
 var TRIAGE_DATEI = "mail-triage.json";
 var AUFBEWAHRUNG_MS = 90 * 24 * 60 * 60 * 1000;
 var ALT_MS = 24 * 60 * 60 * 1000;
 var MAX_PRUEFEN = 500;
 function leseTriage(pfad) {
   try {
-    const j = JSON.parse(readFileSync(pfad, "utf8"));
+    const j = JSON.parse(readFileSync3(pfad, "utf8"));
     return j && typeof j === "object" && !Array.isArray(j) ? j : {};
   } catch {
     return {};
@@ -45902,8 +46519,8 @@ function merkeTriage(pfad, id2, e, jetzt = Date.now()) {
   for (const [k, v] of Object.entries(alle))
     if (typeof v?.am !== "number" || jetzt - v.am > AUFBEWAHRUNG_MS)
       delete alle[k];
-  writeFileSync(`${pfad}.neu`, JSON.stringify(alle));
-  renameSync(`${pfad}.neu`, pfad);
+  writeFileSync3(`${pfad}.neu`, JSON.stringify(alle));
+  renameSync3(`${pfad}.neu`, pfad);
 }
 var normId = (id2) => id2.trim().replace(/^<|>$/g, "").toLowerCase();
 async function zaehleLiegengebliebene(c, triage, jetzt = Date.now()) {
@@ -45947,22 +46564,9 @@ async function zaehleAlle(konten, triage, jetzt = Date.now()) {
   return summe;
 }
 
-// typen.ts
-class WerkzeugFehler extends Error {
-}
-
-class Strukturiert {
-  text;
-  struktur;
-  constructor(text2, struktur) {
-    this.text = text2;
-    this.struktur = struktur;
-  }
-}
-
 // waechter.ts
-import { mkdirSync, readFileSync as readFileSync2, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname2 } from "path";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync4, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname4 } from "path";
 class Waechter {
   ort;
   client = null;
@@ -45982,7 +46586,7 @@ class Waechter {
     if (!this.ort.standDatei)
       return;
     try {
-      const j = JSON.parse(readFileSync2(this.ort.standDatei, "utf8"));
+      const j = JSON.parse(readFileSync4(this.ort.standDatei, "utf8"));
       for (const [pfad, v] of Object.entries(j))
         if (typeof v?.uidNext === "number" && typeof v.uidValidity === "string")
           this.stand.set(pfad, { uidNext: v.uidNext, uidValidity: v.uidValidity });
@@ -45992,13 +46596,13 @@ class Waechter {
     if (!this.ort.standDatei)
       return;
     try {
-      mkdirSync(dirname2(this.ort.standDatei), { recursive: true });
-      writeFileSync2(`${this.ort.standDatei}.neu`, JSON.stringify(Object.fromEntries(this.stand)));
-      renameSync2(`${this.ort.standDatei}.neu`, this.ort.standDatei);
+      mkdirSync3(dirname4(this.ort.standDatei), { recursive: true });
+      writeFileSync4(`${this.ort.standDatei}.neu`, JSON.stringify(Object.fromEntries(this.stand)));
+      renameSync4(`${this.ort.standDatei}.neu`, this.ort.standDatei);
     } catch {}
   }
-  z(art, text2) {
-    this.ort.zustand?.({ art, text: text2 });
+  z(art, text3) {
+    this.ort.zustand?.({ art, text: text3 });
   }
   start() {
     if (this.aktiv)
@@ -46111,8 +46715,8 @@ function imapClient(o) {
 }
 
 // werkzeuge.ts
-import { readFileSync as readFileSync3, statSync, writeFileSync as writeFileSync3 } from "fs";
-import { join as join2 } from "path";
+import { readFileSync as readFileSync5, statSync, writeFileSync as writeFileSync5 } from "fs";
+import { join as join3 } from "path";
 
 // node_modules/postal-mime/dist/esm/decode-strings.js
 var textEncoder = new TextEncoder;
@@ -47214,12 +47818,12 @@ class MimeNode {
         if (this.postalMime.counters.headerSize > maxHeadersSize) {
           throw createError("EMAXHEADERSIZE", `Maximum header size of ${maxHeadersSize} bytes exceeded`);
         }
-        const text2 = decodeUtf8OrWindows1252(line, headerDecoder);
-        if (!isWsp(line[0]) && !FIELD_START.test(text2)) {
+        const text3 = decodeUtf8OrWindows1252(line, headerDecoder);
+        if (!isWsp(line[0]) && !FIELD_START.test(text3)) {
           this.endHeaders();
           return true;
         }
-        this.headerLines.push(text2);
+        this.headerLines.push(text3);
         break;
       }
       case "body":
@@ -49907,12 +50511,12 @@ function isSpaceCode(code) {
 function isWordCode(code) {
   return code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122 || code === 95;
 }
-function isBoundary(text2, at) {
-  return isWordCode(text2.charCodeAt(at - 1)) !== isWordCode(text2.charCodeAt(at));
+function isBoundary(text3, at) {
+  return isWordCode(text3.charCodeAt(at - 1)) !== isWordCode(text3.charCodeAt(at));
 }
-function indexOfAt(text2, from, to) {
+function indexOfAt(text3, from, to) {
   for (let i = from;i < to; i++) {
-    if (text2.charCodeAt(i) === 64) {
+    if (text3.charCodeAt(i) === 64) {
       return i;
     }
   }
@@ -49950,11 +50554,11 @@ function collapseAtSpacing(value) {
   }
   return joinAtSpacing(value, at);
 }
-function looseAddressStart(text2) {
-  const len = text2.length;
+function looseAddressStart(text3) {
+  const len = text3.length;
   let pos = 0;
   while (pos < len) {
-    while (pos < len && isSpaceCode(text2.charCodeAt(pos))) {
+    while (pos < len && isSpaceCode(text3.charCodeAt(pos))) {
       pos++;
     }
     if (pos >= len) {
@@ -49962,14 +50566,14 @@ function looseAddressStart(text2) {
     }
     const runStart = pos;
     let runEnd = pos;
-    while (runEnd < len && !isSpaceCode(text2.charCodeAt(runEnd))) {
+    while (runEnd < len && !isSpaceCode(text3.charCodeAt(runEnd))) {
       runEnd++;
     }
-    let at = indexOfAt(text2, runStart, runEnd);
+    let at = indexOfAt(text3, runStart, runEnd);
     if (at >= 0) {
       let lastBoundary = -1;
       for (let k = runEnd;k > runStart; k--) {
-        if (isBoundary(text2, k)) {
+        if (isBoundary(text3, k)) {
           lastBoundary = k;
           break;
         }
@@ -49978,12 +50582,12 @@ function looseAddressStart(text2) {
       while (lastBoundary >= 0 && at >= 0) {
         if (at > atomStart && runEnd > at + 1 && lastBoundary > at + 1) {
           for (let start = atomStart;start < at; start++) {
-            if (isBoundary(text2, start)) {
+            if (isBoundary(text3, start)) {
               if (start > runStart) {
                 return start;
               }
               let padded = runStart;
-              while (padded > 0 && isSpaceCode(text2.charCodeAt(padded - 1))) {
+              while (padded > 0 && isSpaceCode(text3.charCodeAt(padded - 1))) {
                 padded--;
               }
               return padded;
@@ -49991,29 +50595,29 @@ function looseAddressStart(text2) {
           }
         }
         atomStart = at + 1;
-        at = indexOfAt(text2, atomStart, runEnd);
+        at = indexOfAt(text3, atomStart, runEnd);
       }
     }
     pos = runEnd;
   }
   return -1;
 }
-function recoverAddrSpec(address, text2) {
+function recoverAddrSpec(address, text3) {
   address = collapseAtSpacing(address);
   if (!HAS_WHITESPACE.test(address)) {
-    return { address, text: text2 };
+    return { address, text: text3 };
   }
   let rest;
   const quoted = address.match(QUOTED_LOCAL_ADDR);
   if (quoted) {
     if (!quoted[2]) {
-      return { address, text: text2 };
+      return { address, text: text3 };
     }
     address = quoted[1];
     rest = [quoted[2]];
   } else {
     if (address.indexOf('"') >= 0) {
-      return { address, text: text2 };
+      return { address, text: text3 };
     }
     const parts = address.split(/\s+/);
     let addrIndex = parts.findIndex(isAddrSpec);
@@ -50021,14 +50625,14 @@ function recoverAddrSpec(address, text2) {
       addrIndex = parts.findIndex((part) => LOOSE_ADDR_SPEC.test(part));
     }
     if (addrIndex < 0) {
-      return { address, text: text2 };
+      return { address, text: text3 };
     }
     address = parts.splice(addrIndex, 1)[0];
     rest = parts;
   }
   return {
     address,
-    text: [text2, ...rest].filter((part) => part).join(" ")
+    text: [text3, ...rest].filter((part) => part).join(" ")
   };
 }
 function stripAddressComments(address) {
@@ -50106,7 +50710,7 @@ function stripAddressComments(address) {
   if (depth) {
     comments.push(comment.trim());
   }
-  return { address: result.trim(), comments: comments.filter((text2) => text2) };
+  return { address: result.trim(), comments: comments.filter((text3) => text3) };
 }
 function collectAddressParts(tokens, from, to) {
   let state = "text";
@@ -50238,23 +50842,23 @@ function _handleAddress(tokens, from, to) {
     data.text = data.text.concat(data.address.splice(1));
   }
   const addressFromQuotedText = !data.address.length && data.textWasQuoted.some((wasQuoted) => wasQuoted);
-  let text2 = data.text.join(" ");
+  let text3 = data.text.join(" ");
   let addressValue = data.address.join(" ");
-  if (!addressValue && isEncodedWordsOnly(text2.trim())) {
-    return { address: "", name: decodeWords(text2) };
+  if (!addressValue && isEncodedWordsOnly(text3.trim())) {
+    return { address: "", name: decodeWords(text3) };
   }
-  if (addressFromQuotedText && text2.indexOf("@") >= 0) {
-    addressValue = quoteLocalPart(joinAtSpacing(text2, domainAt(text2)));
-    text2 = "";
+  if (addressFromQuotedText && text3.indexOf("@") >= 0) {
+    addressValue = quoteLocalPart(joinAtSpacing(text3, domainAt(text3)));
+    text3 = "";
   }
-  ({ address: addressValue, text: text2 } = recoverAddrSpec(addressValue, text2));
-  if (!text2 && addressComments.length) {
-    text2 = addressComments.join(" ");
+  ({ address: addressValue, text: text3 } = recoverAddrSpec(addressValue, text3));
+  if (!text3 && addressComments.length) {
+    text3 = addressComments.join(" ");
     textFromComment = true;
   }
-  const rawName = text2 || addressValue || "";
+  const rawName = text3 || addressValue || "";
   const address = {
-    address: addressValue || (textFromComment ? "" : text2) || "",
+    address: addressValue || (textFromComment ? "" : text3) || "",
     name: decodeWords(rawName)
   };
   if (address.address === rawName || address.address === address.name) {
@@ -55079,12 +55683,12 @@ function _isSpaceCode(code) {
 function _isWordCode(code) {
   return code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122 || code === 95;
 }
-function _isBoundary(text2, at) {
-  return _isWordCode(text2.charCodeAt(at - 1)) !== _isWordCode(text2.charCodeAt(at));
+function _isBoundary(text3, at) {
+  return _isWordCode(text3.charCodeAt(at - 1)) !== _isWordCode(text3.charCodeAt(at));
 }
-function _indexOfAt(text2, from, to) {
+function _indexOfAt(text3, from, to) {
   for (let i = from;i < to; i++) {
-    if (text2.charCodeAt(i) === 64) {
+    if (text3.charCodeAt(i) === 64) {
       return i;
     }
   }
@@ -55122,11 +55726,11 @@ function _collapseAtSpacing(value) {
   }
   return _joinAtSpacing(value, at);
 }
-function _looseAddressStart(text2) {
-  const len = text2.length;
+function _looseAddressStart(text3) {
+  const len = text3.length;
   let pos = 0;
   while (pos < len) {
-    while (pos < len && _isSpaceCode(text2.charCodeAt(pos))) {
+    while (pos < len && _isSpaceCode(text3.charCodeAt(pos))) {
       pos++;
     }
     if (pos >= len) {
@@ -55134,14 +55738,14 @@ function _looseAddressStart(text2) {
     }
     const runStart = pos;
     let runEnd = pos;
-    while (runEnd < len && !_isSpaceCode(text2.charCodeAt(runEnd))) {
+    while (runEnd < len && !_isSpaceCode(text3.charCodeAt(runEnd))) {
       runEnd++;
     }
-    let at = _indexOfAt(text2, runStart, runEnd);
+    let at = _indexOfAt(text3, runStart, runEnd);
     if (at >= 0) {
       let lastBoundary = -1;
       for (let k = runEnd;k > runStart; k--) {
-        if (_isBoundary(text2, k)) {
+        if (_isBoundary(text3, k)) {
           lastBoundary = k;
           break;
         }
@@ -55150,12 +55754,12 @@ function _looseAddressStart(text2) {
       while (lastBoundary >= 0 && at >= 0) {
         if (at > atomStart && runEnd > at + 1 && lastBoundary > at + 1) {
           for (let start = atomStart;start < at; start++) {
-            if (_isBoundary(text2, start)) {
+            if (_isBoundary(text3, start)) {
               if (start > runStart) {
                 return start;
               }
               let padded = runStart;
-              while (padded > 0 && _isSpaceCode(text2.charCodeAt(padded - 1))) {
+              while (padded > 0 && _isSpaceCode(text3.charCodeAt(padded - 1))) {
                 padded--;
               }
               return padded;
@@ -55163,7 +55767,7 @@ function _looseAddressStart(text2) {
           }
         }
         atomStart = at + 1;
-        at = _indexOfAt(text2, atomStart, runEnd);
+        at = _indexOfAt(text3, atomStart, runEnd);
       }
     }
     pos = runEnd;
@@ -55277,7 +55881,7 @@ function _stripAddressComments(address) {
   if (depth) {
     comments.push(comment.trim());
   }
-  return { address: result.trim(), comments: comments.filter((text2) => text2) };
+  return { address: result.trim(), comments: comments.filter((text3) => text3) };
 }
 function _collectAddressParts(tokens, from, to) {
   let state = "text";
@@ -56973,16 +57577,16 @@ class MailComposer {
   }
   getAlternatives() {
     const alternatives = [];
-    let text2, html, watchHtml, amp, eventObject;
+    let text3, html, watchHtml, amp, eventObject;
     if (this.mail.text) {
       if (isContentObject(this.mail.text)) {
-        text2 = this.mail.text;
+        text3 = this.mail.text;
       } else {
-        text2 = {
+        text3 = {
           content: this.mail.text
         };
       }
-      text2.contentType = "text/plain; charset=utf-8";
+      text3.contentType = "text/plain; charset=utf-8";
     }
     if (this.mail.watchHtml) {
       if (isContentObject(this.mail.watchHtml)) {
@@ -57022,7 +57626,7 @@ class MailComposer {
       }
       html.contentType = "text/html; charset=utf-8";
     }
-    [].concat(text2 || []).concat(watchHtml || []).concat(amp || []).concat(html || []).concat(eventObject || []).concat(this.mail.alternatives || []).forEach((alternative) => {
+    [].concat(text3 || []).concat(watchHtml || []).concat(amp || []).concat(html || []).concat(eventObject || []).concat(this.mail.alternatives || []).forEach((alternative) => {
       if (/^data:/i.test(alternative.path || alternative.href)) {
         alternative = this._processDataUrl(alternative);
       }
@@ -57336,7 +57940,7 @@ function baueAntwort(e) {
   const von = o.von ?? { address: "" };
   const k = kopfzeile(o.datum ?? new Date, von.name ?? "", von.address);
   const sig = signaturTeil(e.absender, e.signatur);
-  const text2 = `${e.text.trimEnd()}
+  const text3 = `${e.text.trimEnd()}
 
 ${sig ? `${sig.text}
 
@@ -57353,7 +57957,7 @@ ${zitat(o.text)}
     subject: betreffRe(o.betreff),
     inReplyTo: o.messageId ?? undefined,
     references: refs.length ? refs : undefined,
-    text: text2,
+    text: text3,
     html: h,
     attachments: anhaenge([...e.anhaenge, ...sig?.bilder ?? []]),
     headers: entwurfKoepfe(e.session)
@@ -57441,7 +58045,7 @@ function str(a, k, pflicht = false) {
     throw new WerkzeugFehler(`${k} muss Text sein`);
   return v;
 }
-function zahl(a, k, std, min = 1, max = Number.MAX_SAFE_INTEGER) {
+function zahl2(a, k, std, min = 1, max = Number.MAX_SAFE_INTEGER) {
   const v = a[k];
   if (v === undefined || v === null) {
     if (std === null)
@@ -57674,7 +58278,7 @@ function mailWerkzeuge(o) {
       summe += s.size;
       if (summe > MAX_ANHANG)
         throw new WerkzeugFehler("Anh\xE4nge zusammen \xFCber 25 MB");
-      return { name: sichererName(p.split("/").pop() ?? "anhang"), inhalt: readFileSync3(p) };
+      return { name: sichererName(p.split("/").pop() ?? "anhang"), inhalt: readFileSync5(p) };
     });
   }
   async function ablegen(k, c, roh) {
@@ -57699,7 +58303,7 @@ function mailWerkzeuge(o) {
       schema: { type: "object", properties: { ...kontoSchema, ordner: ordnerSchema, anzahl: { type: "integer", minimum: 1, maximum: MAX_ANZAHL, description: "Standard 20" }, nur_ungelesen: { type: "boolean" } } },
       aufruf: async (a) => {
         const k = konto(a);
-        const anzahl = zahl(a, "anzahl", 20, 1, MAX_ANZAHL);
+        const anzahl = zahl2(a, "anzahl", 20, 1, MAX_ANZAHL);
         const nurNeu = bool(a, "nur_ungelesen", false);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
@@ -57744,7 +58348,7 @@ function mailWerkzeuge(o) {
           q.before = new Date(bis.getTime() + 86400000);
         if (!Object.keys(q).length)
           throw new WerkzeugFehler("Mindestens eins von von, betreff, seit, bis angeben");
-        const anzahl = zahl(a, "anzahl", 30, 1, MAX_ANZAHL);
+        const anzahl = zahl2(a, "anzahl", 30, 1, MAX_ANZAHL);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
           const l = await imOrdner(c, pfad, () => liste_(k, c, pfad, q, anzahl));
@@ -57759,12 +58363,12 @@ function mailWerkzeuge(o) {
       schema: { type: "object", properties: { ...kontoSchema, ordner: ordnerSchema, uid: uidSchema }, required: ["uid"] },
       aufruf: async (a) => {
         const k = konto(a);
-        const uid = zahl(a, "uid", null);
+        const uid = zahl2(a, "uid", null);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
           const { n, p } = await imOrdner(c, pfad, () => hole(c, uid));
           const o2 = original(p);
-          const text2 = o2.text.length > MAX_TEXT ? `${o2.text.slice(0, MAX_TEXT)}
+          const text3 = o2.text.length > MAX_TEXT ? `${o2.text.slice(0, MAX_TEXT)}
 [\u2026 gek\xFCrzt, ${o2.text.length} Zeichen]` : o2.text;
           return {
             konto: k.name,
@@ -57778,7 +58382,7 @@ function mailWerkzeuge(o) {
             betreff: o2.betreff,
             message_id: o2.messageId,
             entwurf: n.flags?.has("\\Draft") ?? false,
-            text: text2,
+            text: text3,
             anhaenge: p.attachments.map((x, i) => ({ index: i, name: x.filename ?? null, typ: x.mimeType, groesse: bytes(x.content).length, inline: x.disposition === "inline" }))
           };
         });
@@ -57790,8 +58394,8 @@ function mailWerkzeuge(o) {
       schema: { type: "object", properties: { ...kontoSchema, ordner: ordnerSchema, uid: uidSchema, index: { type: "integer", minimum: 0, description: "Index aus mail_lesen" }, ziel: { type: "string", description: "Absoluter Ordner oder Dateipfad" } }, required: ["uid", "index", "ziel"] },
       aufruf: async (a, wer) => {
         const k = konto(a);
-        const uid = zahl(a, "uid", null);
-        const index = zahl(a, "index", null, 0, 1000);
+        const uid = zahl2(a, "uid", null);
+        const index = zahl2(a, "index", null, 0, 1000);
         let ziel = str(a, "ziel", true);
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
@@ -57801,14 +58405,14 @@ function mailWerkzeuge(o) {
             throw new WerkzeugFehler(`Anhang ${index} gibt es nicht, die Mail hat ${p.attachments.length}`);
           try {
             if (statSync(ziel).isDirectory())
-              ziel = join2(ziel, sichererName(x.filename ?? `anhang-${index}`));
+              ziel = join3(ziel, sichererName(x.filename ?? `anhang-${index}`));
           } catch {}
           const g = pruefePfad(ziel, wurzeln);
           if (g)
             throw new WerkzeugFehler(g);
           const inhalt = bytes(x.content);
           try {
-            writeFileSync3(ziel, inhalt, { flag: "wx", mode: 420 });
+            writeFileSync5(ziel, inhalt, { flag: "wx", mode: 420 });
           } catch (e) {
             if (e.code === "EEXIST")
               throw new WerkzeugFehler(`${ziel} gibt es schon, nichts \xFCberschrieben`);
@@ -57836,15 +58440,15 @@ function mailWerkzeuge(o) {
       },
       aufruf: async (a, wer) => {
         const k = konto(a);
-        const uid = zahl(a, "uid", null);
-        const text2 = str(a, "text", true);
+        const uid = zahl2(a, "uid", null);
+        const text3 = str(a, "text", true);
         const dateien = dateienLesen(liste(a, "anhaenge"));
         return k.verbindung.mit(async (c) => {
           const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
           const { p } = await imOrdner(c, pfad, () => hole(c, uid));
           const o2 = original(p);
           const imGesendet = await istGesendetOrdner(k, c, pfad);
-          const roh = await baueAntwort({ original: o2, absender: k.absender, text: text2, allen: bool(a, "allen", false), signatur: bool(a, "signatur", true), anhaenge: dateien, session: wer.session, imGesendet });
+          const roh = await baueAntwort({ original: o2, absender: k.absender, text: text3, allen: bool(a, "allen", false), signatur: bool(a, "signatur", true), anhaenge: dateien, session: wer.session, imGesendet });
           const r = await ablegen(k, c, roh);
           return { entwurf: r, betreff: o2.betreff, im_verlauf: !!o2.messageId, anhaenge: dateien.map((d) => d.name), karten_hinweis: kartenHinweis(k.name, r, "antwort") };
         });
@@ -57877,7 +58481,7 @@ function mailWerkzeuge(o) {
       schema: { type: "object", properties: { ...kontoSchema, anzahl: { type: "integer", minimum: 1, maximum: MAX_ANZAHL, description: "Standard 30" } } },
       aufruf: async (a) => {
         const k = konto(a);
-        const anzahl = zahl(a, "anzahl", 30, 1, MAX_ANZAHL);
+        const anzahl = zahl2(a, "anzahl", 30, 1, MAX_ANZAHL);
         return k.verbindung.mit(async (c) => {
           const d = await drafts(k, c);
           const l = await imOrdner(c, d, () => liste_(k, c, d, {}, anzahl));
@@ -57904,7 +58508,7 @@ function mailWerkzeuge(o) {
       },
       aufruf: async (a, wer) => {
         const k = konto(a);
-        const uid = zahl(a, "uid", null);
+        const uid = zahl2(a, "uid", null);
         const neueDateien = dateienLesen(liste(a, "anhaenge"));
         return k.verbindung.mit(async (c) => {
           const d = await drafts(k, c);
@@ -57935,7 +58539,7 @@ function mailWerkzeuge(o) {
       schema: { type: "object", properties: { ...kontoSchema, uid: { type: "integer", minimum: 1, description: "UID im Entw\xFCrfe-Ordner" } }, required: ["uid"] },
       aufruf: async (a) => {
         const k = konto(a);
-        const uid = zahl(a, "uid", null);
+        const uid = zahl2(a, "uid", null);
         return k.verbindung.mit(async (c) => {
           const d = await drafts(k, c);
           return imOrdner(c, d, async () => {
@@ -58004,7 +58608,7 @@ function mailWerkzeuge(o) {
       schema: { type: "object", properties: { konto: { type: "string" }, uid_next: { type: "integer", minimum: 1 }, uid_validity: { type: "string" } }, required: ["konto"] },
       aufruf: async (a) => {
         const k = konto(a);
-        const stand = a.uid_next === undefined || a.uid_validity === undefined ? null : { uidNext: zahl(a, "uid_next", null), uidValidity: str(a, "uid_validity", true) };
+        const stand = a.uid_next === undefined || a.uid_validity === undefined ? null : { uidNext: zahl2(a, "uid_next", null), uidValidity: str(a, "uid_validity", true) };
         return k.verbindung.mit(async (c) => {
           const s = await c.status("INBOX", { uidNext: true, uidValidity: true });
           if (typeof s.uidNext !== "number" || s.uidNext < 1)
@@ -58057,7 +58661,7 @@ function mailWerkzeuge(o) {
       aufruf: async (a) => {
         const k = konto(a);
         const uuid = str(a, "uuid");
-        const uidArg = a.uid === undefined || a.uid === null ? null : zahl(a, "uid", null);
+        const uidArg = a.uid === undefined || a.uid === null ? null : zahl2(a, "uid", null);
         if (uidArg === null && !uuid)
           throw new WerkzeugFehler("uuid oder uid angeben");
         const mitInhalt = bool(a, "mit_inhalt", false);
@@ -58081,9 +58685,9 @@ function mailWerkzeuge(o) {
             if (n.source.length > MAX_QUELLE)
               throw new WerkzeugFehler("Entwurf ist gr\xF6\xDFer als 40 MB");
             const p = await PostalMime.parse(n.source);
-            const text2 = original(p).text;
+            const text3 = original(p).text;
             inhalt = {
-              text: text2.length > MAX_TEXT ? text2.slice(0, MAX_TEXT) : text2,
+              text: text3.length > MAX_TEXT ? text3.slice(0, MAX_TEXT) : text3,
               html: p.html ?? null,
               anhaenge: p.attachments.map((x) => ({ name: x.filename ?? null, typ: x.mimeType, groesse: bytes(x.content).length, inline: x.disposition === "inline" }))
             };
@@ -58108,7 +58712,7 @@ function mailWerkzeuge(o) {
         const uuid = str(a, "uuid");
         if ([inReplyTo, betreff, uuid].filter((x) => x !== null).length !== 1)
           throw new WerkzeugFehler("genau eins von in_reply_to, betreff, uuid angeben");
-        const seit = a.seit_ms === undefined || a.seit_ms === null ? null : zahl(a, "seit_ms", null, 0);
+        const seit = a.seit_ms === undefined || a.seit_ms === null ? null : zahl2(a, "seit_ms", null, 0);
         const suche = {};
         if (inReplyTo)
           suche.header = { "In-Reply-To": inReplyTo };
@@ -58174,13 +58778,13 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.2.3";
+var VERSION = "1.3.0";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {
   const id2 = msg.id;
   const antwort = (ergebnis) => ({ jsonrpc: "2.0", id: id2, result: ergebnis });
-  const fehler = (code, text2) => ({ jsonrpc: "2.0", id: id2, error: { code, message: text2 } });
+  const fehler = (code, text3) => ({ jsonrpc: "2.0", id: id2, error: { code, message: text3 } });
   if (id2 === undefined || id2 === null)
     return null;
   const params = typeof msg.params === "object" && msg.params !== null ? msg.params : {};
@@ -58206,8 +58810,8 @@ async function verarbeite(defs, msg) {
           return antwort({ content: [{ type: "text", text: JSON.stringify(r.text) }], structuredContent: r.struktur });
         return antwort({ content: [{ type: "text", text: JSON.stringify(r) }] });
       } catch (e) {
-        const text2 = e instanceof WerkzeugFehler ? e.message : `Interner Fehler: ${e instanceof Error ? e.message.slice(0, 200) : "unbekannt"}`;
-        return antwort({ isError: true, content: [{ type: "text", text: text2 }] });
+        const text3 = e instanceof WerkzeugFehler ? e.message : `Interner Fehler: ${e instanceof Error ? e.message.slice(0, 200) : "unbekannt"}`;
+        return antwort({ isError: true, content: [{ type: "text", text: text3 }] });
       }
     }
     default:
@@ -58235,6 +58839,10 @@ function starteWaechter(o) {
     const w = new Waechter({
       neuerClient: () => (o.client ?? imapClient)({ host: c.host, port: c.port, user: c.benutzer, pass }),
       melde: ({ anzahl, gesendet }) => {
+        if (o.signal) {
+          o.signal.melde({ anzahl, gesendet });
+          return;
+        }
         const daten = { konto: c.name, neu: anzahl, gesendet };
         if (anzahl > 0)
           o.melde("mail.neu", `${c.name}: ${anzahl} neu${gesendet > 0 ? `, ${gesendet} gesendet` : ""}`, daten);
@@ -58242,7 +58850,7 @@ function starteWaechter(o) {
           o.melde("mail.neu", `${c.name}: ${gesendet} gesendet`, daten);
       },
       zustand: (z) => o.log(`W\xE4chter ${c.name}: ${z.art}, ${z.text}`),
-      standDatei: join3(o.daten, `stand-${sichererName(c.name)}.json`),
+      standDatei: join4(o.daten, `stand-${sichererName(c.name)}.json`),
       sentMs: o.sentMs,
       backoffMinMs: o.backoffMinMs
     });
@@ -58253,14 +58861,43 @@ function starteWaechter(o) {
   return aus;
 }
 if (import.meta.main) {
-  const daten = join3(process.cwd(), "daten");
+  const daten = join4(process.cwd(), "daten");
   const log = (z) => void process.stderr.write(`${new Date().toISOString()} ${z}
 `);
   const schreibe = (j) => void process.stdout.write(`${JSON.stringify(j)}
 `);
   const fabrik = imapFlow;
-  const defs = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync2(daten, { recursive: true }), join3(daten, TRIAGE_DATEI)) }));
-  const waechter = starteWaechter({ env: process.env, daten, log, melde: (art, text2, daten2) => schreibe({ jsonrpc: "2.0", method: "notifications/leitstand/ereignis", params: { art, text: text2, daten: daten2 } }) });
+  const alle = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync4(daten, { recursive: true }), join4(daten, TRIAGE_DATEI)) }));
+  const klappe = { zu: false };
+  const signal = new MailSignal({
+    pufferDatei: join4(daten, PUFFER_DATEI),
+    nachholStand: join4(daten, NACHHOL_DATEI),
+    zugeklappt: () => klappe.zu,
+    zustellen: (text3) => {
+      schreibe({ jsonrpc: "2.0", method: "notifications/leitstand/ereignis", params: { art: "mail.neu", text: text3, daten: {} } });
+      return true;
+    }
+  });
+  const takt = new MailTakt({
+    daten,
+    signal,
+    klappe,
+    rufe: async (name2, args) => {
+      const d = alle.find((x) => x.name === name2);
+      if (!d)
+        throw new Error(`Werkzeug ${name2} fehlt`);
+      const r = await d.aufruf(args, WER);
+      return r instanceof Strukturiert ? r.struktur : r;
+    },
+    konten: () => {
+      const k = leseKonten(process.env);
+      return k.ok ? k.wert.map((c) => c.name) : [];
+    },
+    triage: () => ({ an: /^(true|1|ja)$/i.test(process.env.PLUGIN_TRIAGE_AN?.trim() ?? ""), taktMin: Math.min(1440, Math.max(1, Number(process.env.PLUGIN_TRIAGE_TAKT_MIN) || 10)) }),
+    log
+  });
+  const defs = [...alle, taktWerkzeug(takt)];
+  const waechter = starteWaechter({ env: process.env, daten, log, signal, melde: (art, text3, daten2) => schreibe({ jsonrpc: "2.0", method: "notifications/leitstand/ereignis", params: { art, text: text3, daten: daten2 } }) });
   let rest = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {
@@ -58268,13 +58905,13 @@ if (import.meta.main) {
     let i;
     while ((i = rest.indexOf(`
 `)) >= 0) {
-      const zeile = rest.slice(0, i).trim();
+      const zeile2 = rest.slice(0, i).trim();
       rest = rest.slice(i + 1);
-      if (!zeile)
+      if (!zeile2)
         continue;
       let msg;
       try {
-        msg = JSON.parse(zeile);
+        msg = JSON.parse(zeile2);
       } catch {
         schreibe({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Kein JSON" } });
         continue;
