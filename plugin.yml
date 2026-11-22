@@ -1,10 +1,14 @@
 name: mail
-version: "1.2.3"
+version: "1.3.0"
 titel: Mail
 beschreibung: "Mail über IMAP (Mailcow, Google per App-Passwort): lesen, suchen, Entwürfe anlegen, ändern und verschieben. Robin schickt Entwürfe selbst ab, Versand gibt es nicht. Der Wächter meldet neue Mails per IDLE als Ereignis mail.neu. Dazu Lesewerkzeuge für den Kern und eine Kontoprüfung."
 start: [bun, dist/server.js]
 dauer: true
 ereignisse: [mail.neu]
+roh: [mail.neu]
+takt: { werkzeug: takt, sekunden: 30, kontext: [klappe, karten, aufgaben, modell] }
+aktionen: [karte_neu, karte_erledige, stoerung, vermerk, modell]
+hinweise: { mail.neu: hinweise/mail-neu.md }
 werkzeuge:
   posteingang: { art: lesen, stufe: frei, text: "Listet die neuesten Mails eines Ordners" }
   suchen: { art: lesen, stufe: frei, text: "Sucht Mails nach Absender, Betreff, Datum oder Lesestatus" }
@@ -21,6 +25,7 @@ werkzeuge:
   entwurf_loeschen: { art: schreiben, stufe: frei, text: "Löscht einen Entwurf (Gmail: in den Papierkorb)" }
   verschieben: { art: schreiben, stufe: frei, text: "Verschiebt Mails in einen anderen Ordner" }
   triage_merke: { art: schreiben, stufe: frei, text: "Merkt, was die Poststelle aus einer Mail gemacht hat" }
+  takt: { art: schreiben, stufe: frei, nur_dienst: true, text: "Takt des Kerns: Triage, Entwurf-Prüfer, Nachholen. Löst Aktionen aus, keine Rolle ruft es" }
   anhang_speichern:
     art: schreiben
     stufe: karte
@@ -47,3 +52,11 @@ einstellungen:
   signatur_text:
     typ: string
     titel: Signatur als Klartext für den Textteil
+  triage_an:
+    typ: boolean
+    titel: Mail-Triage im Takt einschalten
+    standard: false
+  triage_takt_min:
+    typ: number
+    titel: Abstand der Triage in Minuten
+    standard: 10

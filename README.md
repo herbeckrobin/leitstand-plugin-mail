@@ -36,12 +36,24 @@ Der Kopf: `uid`, `message_id`, `in_reply_to`, `betreff`, `an`, `cc` (je `{ name,
 
 `dauer: true`: das Gateway startet den Prozess beim Laden und hält ihn am Leben (Neustart mit Backoff, siehe `docs/plugin-vorlage.md` im Leitstand-Repo). Der Wächter hält je Konto eine IMAP-Verbindung mit IDLE auf INBOX und sieht den Gesendet-Ordner im Takt nach. Gezählt wird über UIDNEXT, eine Lücke nach einem Abbruch oder Neustart zählt genau einmal, ein Wechsel der UIDVALIDITY setzt eine neue Basis ohne Zählung.
 
-Gemeldet wird die MCP-Notification `notifications/leitstand/ereignis` mit `art: mail.neu`, einem Text aus Kontoname und Zahlen (`privat: 2 neu, 1 gesendet`) und `daten: { konto, neu, gesendet }` für den Kern. Nie Betreff, Adresse oder Inhalt. Zählstände und die Nachholzählung bleiben im Kern.
+Gemeldet wird die MCP-Notification `notifications/leitstand/ereignis` mit `art: mail.neu` im Rahmen `roh` (plugin.yml: `roh: [mail.neu]`): `text` ist der fertige Channel-Text (`<channel source="mailsignal" anzahl="2" gesendet="1">2 neue Mails, 1 gesendet</channel>`), `daten` bleibt leer. Das Plugin zählt, puffert (`mailsignal-puffer.json`) und hält den Nachhol-Stand (`mailsignal-nachhol.json`) im Datenordner, `signal.ts`. Bei zugeklappter Klappe (aus dem Takt-Kontext) bleibt der Text im Puffer und kommt als "gesammelt" nach. Nie Betreff, Adresse oder Inhalt. Den Hinweis für die Poststelle liefert `hinweise/mail-neu.md` (plugin.yml: `hinweise`).
+
+## Takt und Aktionen
+
+Das Werkzeug `takt` (plugin.yml: `nur_dienst: true`, keine Rolle ruft es) ruft der Kern alle 30 Sekunden mit `jetzt`, `klappe`, `karten`, `aufgaben` und `modell` aus dem Kontext (`takt.kontext`). Die Antwort ist ein JSON-Text `{ "aktionen": [...] }`, höchstens 20. Was das Plugin darin tut (`takt.ts`):
+
+- **Nachholen:** stündlich die Zahl liegengebliebener Mails, nur über das Signal, keine Aktion.
+- **Triage** (Einstellung `triage_an`, Abstand `triage_takt_min`): neue Mails je Konto über `neue_seit`. Die Regel aus den Aufgaben (Ball bei Robin, Frist bis morgen) entscheidet zuerst, den Rest bestellt das Plugin als Aktion `modell` (höchstens 3 Anfragen mit je 20 Mails je Takt). Das Ergebnis kommt im nächsten Takt in `kontext.modell`. Fehlt es oder schlägt es fehl, zählt die Mail als "braucht dich". Ergebnis ist eine Sammelkarte als `karte_neu` mit Schlüssel `mail-triage-<Beginn>`. Stand und Sammlung liegen wie im Kern in `mailtriage-stand.json` im Datenordner.
+- **Entwurf-Prüfer:** für jede offene Review-Karte mit `entwurf` sucht das Plugin den Entwurf (`entwurf_finde`) und das Gesendete (`gesendet_finde`). Liegt es dort mit Message-ID, kommt `karte_erledige` mit der Message-ID als `beleg`. Ohne Message-ID bleibt die Karte offen.
+- **Störungen:** `stoerung` mit Stelle `mail.entwurf` oder `mail.triage`, einmal je Ursache, nie mit Postfachinhalt.
+
+Nicht gebaut: Vorschau auf der Review-Karte und die Tagesablauf-Einstellung (ADR 0051). Der Kern kennt `takt`, `aktionen`, `hinweise`, `roh` und `nur_dienst` in `leseYml` erst nach dem Merge von A-2344, bis dahin prüft `test/pluginyml.test.ts` diese Felder gegen den Vertrag.
 
 ## Einstellungen
 
 - `konten` (Pflicht): JSON-Liste, je Eintrag `name`, `host`, `benutzer`, optional `port` (993), `adresse`, `anzeigename`, `loeschen` (`expunge` oder `papierkorb`, Gmail braucht `papierkorb`). Setzbar mit `plugin_wert_setzen`.
 - `passwoerter` (Pflicht, geheim): JSON-Objekt Kontoname auf Passwort, Google mit App-Passwort. Nur das Fenster trägt es ein (Schlüsselbund). Ein Parsefehler nennt nie einen Teil des Werts.
+- `triage_an` (Standard aus), `triage_takt_min` (Standard 10): Mail-Triage im Takt, siehe "Takt und Aktionen".
 - `signatur_html`, `signatur_text`: Signatur für Entwürfe. `signatur_text` allein genügt (HTML wird daraus gebaut), mit `signatur_html` dient `signatur_text` als Textteil. Beide leer: kein Gruß.
 
 Beispiel `konten` (ohne Zugangsdaten):

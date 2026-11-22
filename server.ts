@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { baueKonten, leseKonten, lesePasswoerter, type ImapFabrik } from './konten.ts';
 import { imapFlow } from './imap.ts';
 import { sichererName } from './pfade.ts';
+import { MailSignal, NACHHOL_DATEI, PUFFER_DATEI } from './signal.ts';
+import { MailTakt, taktWerkzeug } from './takt.ts';
 import { TRIAGE_DATEI } from './triage.ts';
 import { Strukturiert, WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
 import { imapClient, Waechter, type ImapClient } from './waechter.ts';
@@ -14,7 +16,7 @@ import { mailWerkzeuge } from './werkzeuge.ts';
 // Der Text einer Meldung enthält nur Kontoname und Zahlen, nie Betreff, Adresse oder Inhalt.
 
 const PROTOKOLL = '2025-03-26';
-const VERSION = '1.2.3';
+const VERSION = '1.3.0';
 
 /** Zahlen des Ereignisses mail.neu, Form wie im Vertrag mit dem Kern (mailNeuDaten). */
 export interface MailNeuDaten {
@@ -75,6 +77,8 @@ export interface WaechterStart {
   client?: (z: { host: string; port: number; user: string; pass: string }) => ImapClient;
   sentMs?: number;
   backoffMinMs?: number;
+  /** Mit Signal geht jede Zahl des Wächters durch den Puffer und kommt als Ereignis mit fertigem Text (roh) an, ohne bleibt es bei melde. */
+  signal?: MailSignal;
 }
 
 /** Ein Wächter je Konto mit Passwort. Fehlt eine Einstellung oder ein Passwort, steht eine Logzeile da und der Prozess läuft ohne Wächter weiter. */
@@ -99,6 +103,10 @@ export function starteWaechter(o: WaechterStart): Waechter[] {
     const w = new Waechter({
       neuerClient: () => (o.client ?? imapClient)({ host: c.host, port: c.port, user: c.benutzer, pass }),
       melde: ({ anzahl, gesendet }) => {
+        if (o.signal) {
+          o.signal.melde({ anzahl, gesendet });
+          return;
+        }
         const daten: MailNeuDaten = { konto: c.name, neu: anzahl, gesendet };
         if (anzahl > 0) o.melde('mail.neu', `${c.name}: ${anzahl} neu${gesendet > 0 ? `, ${gesendet} gesendet` : ''}`, daten);
         else o.melde('mail.neu', `${c.name}: ${gesendet} gesendet`, daten);
@@ -120,8 +128,37 @@ if (import.meta.main) {
   const log = (z: string): void => void process.stderr.write(`${new Date().toISOString()} ${z}\n`);
   const schreibe = (j: Json): void => void process.stdout.write(`${JSON.stringify(j)}\n`);
   const fabrik: ImapFabrik = imapFlow;
-  const defs = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync(daten, { recursive: true }), join(daten, TRIAGE_DATEI)) }));
-  const waechter = starteWaechter({ env: process.env, daten, log, melde: (art, text, daten) => schreibe({ jsonrpc: '2.0', method: 'notifications/leitstand/ereignis', params: { art, text, daten } }) });
+  const alle = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync(daten, { recursive: true }), join(daten, TRIAGE_DATEI)) }));
+  const klappe = { zu: false };
+  // Der Text ist fertig (roh): der Kern stellt ihn unverändert zu, daten bleibt leer.
+  const signal = new MailSignal({
+    pufferDatei: join(daten, PUFFER_DATEI),
+    nachholStand: join(daten, NACHHOL_DATEI),
+    zugeklappt: () => klappe.zu,
+    zustellen: (text) => {
+      schreibe({ jsonrpc: '2.0', method: 'notifications/leitstand/ereignis', params: { art: 'mail.neu', text, daten: {} } });
+      return true;
+    },
+  });
+  const takt = new MailTakt({
+    daten,
+    signal,
+    klappe,
+    rufe: async (name, args) => {
+      const d = alle.find((x) => x.name === name);
+      if (!d) throw new Error(`Werkzeug ${name} fehlt`);
+      const r = await d.aufruf(args, WER);
+      return (r instanceof Strukturiert ? r.struktur : r) as Json;
+    },
+    konten: () => {
+      const k = leseKonten(process.env);
+      return k.ok ? k.wert.map((c) => c.name) : [];
+    },
+    triage: () => ({ an: /^(true|1|ja)$/i.test(process.env.PLUGIN_TRIAGE_AN?.trim() ?? ''), taktMin: Math.min(1440, Math.max(1, Number(process.env.PLUGIN_TRIAGE_TAKT_MIN) || 10)) }),
+    log,
+  });
+  const defs = [...alle, taktWerkzeug(takt)];
+  const waechter = starteWaechter({ env: process.env, daten, log, signal, melde: (art, text, daten) => schreibe({ jsonrpc: '2.0', method: 'notifications/leitstand/ereignis', params: { art, text, daten } }) });
   let rest = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk: string) => {
