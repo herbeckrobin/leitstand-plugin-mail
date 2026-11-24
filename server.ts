@@ -16,7 +16,7 @@ import { mailWerkzeuge } from './werkzeuge.ts';
 // Der Text einer Meldung enthält nur Kontoname und Zahlen, nie Betreff, Adresse oder Inhalt.
 
 const PROTOKOLL = '2025-03-26';
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 
 /** Zahlen des Ereignisses mail.neu, Form wie im Vertrag mit dem Kern (mailNeuDaten). */
 export interface MailNeuDaten {
