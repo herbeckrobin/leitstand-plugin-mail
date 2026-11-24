@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailpdf/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-absender/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailpdf/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-absender/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -50234,7 +50234,7 @@ function leseKonten(env = process.env) {
       return { ok: false, fehler: `Konto ${name2}: loeschen muss expunge oder papierkorb sein` };
     if (konten.some((k) => k.name === name2))
       return { ok: false, fehler: `Konto ${name2} steht doppelt in konten` };
-    konten.push({ name: name2, host, port, benutzer, adresse: text(o.adresse) ?? benutzer, anzeigename: text(o.anzeigename) ?? name2, loeschen: o.loeschen === "papierkorb" ? "papierkorb" : "expunge" });
+    konten.push({ name: name2, host, port, benutzer, adresse: text(o.adresse) ?? benutzer, anzeigename: text(o.anzeigename), loeschen: o.loeschen === "papierkorb" ? "papierkorb" : "expunge" });
   }
   return { ok: true, wert: konten };
 }
@@ -50266,6 +50266,7 @@ function baueKonten(env = process.env, fabrik = imapFlow) {
   const p = lesePasswoerter(env);
   const sig = leseSignatur(env);
   const klartext = sig?.text ?? "";
+  const absenderName = text(env.PLUGIN_ABSENDER_NAME);
   const liste = k.ok ? k.wert : [];
   return liste.map((c) => {
     const pass = p.ok ? p.wert[c.name] : undefined;
@@ -50275,7 +50276,7 @@ function baueKonten(env = process.env, fabrik = imapFlow) {
       return fabrik({ host: c.host, port: c.port, user: c.benutzer, pass });
     };
     const absender = {
-      name: c.anzeigename,
+      name: c.anzeigename ?? absenderName ?? "",
       adresse: c.adresse,
       signatur: klartext,
       signaturHtml: sig?.html ? () => ({ html: sig.html, text: sig.text, bilder: [] }) : undefined
@@ -111056,7 +111057,7 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.4.0";
+var VERSION = "1.5.0";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {

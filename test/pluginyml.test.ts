@@ -54,7 +54,7 @@ const AKTIONEN = ['karte_neu', 'karte_erledige', 'stoerung', 'vermerk', 'modell'
 const TAKT_KONTEXT = ['klappe', 'karten', 'aufgaben', 'modell'];
 
 type Werkzeug = { art: string; stufe: string; text: string; hinweis?: string; nur_dienst?: boolean };
-type Einstellung = { typ: string; titel: string; geheim?: boolean; pflicht?: boolean; standard?: unknown };
+type Einstellung = { typ: string; titel: string; geheim?: boolean; pflicht?: boolean; empfohlen?: boolean; standard?: unknown };
 type Roh = {
   name: unknown;
   version: unknown;
@@ -235,8 +235,18 @@ describe('Einstellungen', () => {
       expect(TYPEN, name).toContain(e.typ);
       if (e.geheim !== undefined) expect(typeof e.geheim, `${name}.geheim`).toBe('boolean');
       if (e.pflicht !== undefined) expect(typeof e.pflicht, `${name}.pflicht`).toBe('boolean');
+      // Wie leseYml im Kern (ab a9f7aa02): empfohlen ist true oder false, sonst lehnt der Kern ab.
+      if (e.empfohlen !== undefined) expect(typeof e.empfohlen, `${name}.empfohlen`).toBe('boolean');
       if (e.geheim === true) expect(e.standard, `${name}: geheim ohne standard`).toBeUndefined();
     }
+  });
+
+  test('empfohlen steht genau an absender_name und signatur_text, ohne Standardwert', () => {
+    const empfohlen = Object.entries(roh.einstellungen).filter(([, e]) => e.empfohlen === true).map(([n]) => n);
+    expect(empfohlen.sort()).toEqual(['absender_name', 'signatur_text']);
+    expect(roh.einstellungen.absender_name).toMatchObject({ typ: 'string' });
+    expect(roh.einstellungen.absender_name!.standard).toBeUndefined();
+    expect(roh.einstellungen.absender_name!.pflicht).toBeUndefined();
   });
 
   test('Triage-Einstellungen: Typ und Vorgabe, wie server.ts sie liest', () => {

@@ -12,8 +12,8 @@ export interface KontoKonfig {
   benutzer: string;
   /** Absenderadresse, Standard der Benutzer. */
   adresse: string;
-  /** Anzeigename im Absender, Standard der Kontoname. */
-  anzeigename: string;
+  /** Eigener Anzeigename des Kontos. Fehlt er, greift die Einstellung `absender_name`, nie der Kontoname (A-2395). */
+  anzeigename: string | null;
   loeschen: 'expunge' | 'papierkorb';
 }
 
@@ -44,7 +44,7 @@ export function leseKonten(env: Umgebung = process.env): Ergebnis<KontoKonfig[]>
     if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, fehler: `Konto ${name}: port ungültig` };
     if (o.loeschen !== undefined && o.loeschen !== 'expunge' && o.loeschen !== 'papierkorb') return { ok: false, fehler: `Konto ${name}: loeschen muss expunge oder papierkorb sein` };
     if (konten.some((k) => k.name === name)) return { ok: false, fehler: `Konto ${name} steht doppelt in konten` };
-    konten.push({ name, host, port, benutzer, adresse: text(o.adresse) ?? benutzer, anzeigename: text(o.anzeigename) ?? name, loeschen: o.loeschen === 'papierkorb' ? 'papierkorb' : 'expunge' });
+    konten.push({ name, host, port, benutzer, adresse: text(o.adresse) ?? benutzer, anzeigename: text(o.anzeigename), loeschen: o.loeschen === 'papierkorb' ? 'papierkorb' : 'expunge' });
   }
   return { ok: true, wert: konten };
 }
@@ -80,6 +80,7 @@ export function baueKonten(env: Umgebung = process.env, fabrik: ImapFabrik = ima
   const p = lesePasswoerter(env);
   const sig = leseSignatur(env);
   const klartext = sig?.text ?? '';
+  const absenderName = text(env.PLUGIN_ABSENDER_NAME);
   const liste = k.ok ? k.wert : [];
   return liste.map((c) => {
     const pass = p.ok ? p.wert[c.name] : undefined;
@@ -88,7 +89,8 @@ export function baueKonten(env: Umgebung = process.env, fabrik: ImapFabrik = ima
       return fabrik({ host: c.host, port: c.port, user: c.benutzer, pass });
     };
     const absender: Absender = {
-      name: c.anzeigename,
+      // Der Kontoname ("mailcow") ist ein interner Schlüssel und steht nie im From (A-2395).
+      name: c.anzeigename ?? absenderName ?? '',
       adresse: c.adresse,
       signatur: klartext,
       // Nur Text gesetzt: kein HTML-Teil, signaturTeil baut HTML aus dem Text.
