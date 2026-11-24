@@ -212,13 +212,73 @@ export interface Ersetzt {
   bilder: Anhang[];
 }
 
+/** HTML-Vergleich für Signaturen: Kommentare (Marker) weg, Leerraum zwischen Tags und in Folge zusammengezogen. */
+const htmlNorm = (h: string): string => h.replace(/<!--[\s\S]*?-->/g, '').replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
+const signaturGleich = (gefunden: string, aktuell: string): boolean => htmlNorm(gefunden) === htmlNorm(aktuell);
+
+/**
+ * Ersetzt in `t` (nur vor dem Zitat) den Block, dessen nichtleere Zeilen die der alten Signatur sind, durch `neu`. Alles
+ * andere bleibt Zeichen für Zeichen stehen. null, wenn der Block nicht zu finden ist. Der letzte Treffer gilt.
+ */
+function tauscheTextBlock(t: string, alteSig: string, neu: string): string | null {
+  const alt = vergleich(alteSig).split('\n').filter(Boolean);
+  if (!alt.length) return null;
+  const zt = zitatStartText(t);
+  const ende = zt >= 0 ? zt : t.length;
+  const zeilen: { von: number; bis: number; n: string }[] = [];
+  for (let p = 0; p < ende; ) {
+    const nl = t.indexOf('\n', p);
+    const rand = nl < 0 || nl > ende ? ende : nl;
+    const bis = t[rand - 1] === '\r' ? rand - 1 : rand;
+    zeilen.push({ von: p, bis, n: vergleich(t.slice(p, bis)) });
+    p = rand + 1;
+  }
+  for (let i = zeilen.length - 1; i >= 0; i--) {
+    if (zeilen[i]!.n !== alt[0]) continue;
+    let k = 0;
+    let letzte = i;
+    for (let j = i; j < zeilen.length && k < alt.length; j++) {
+      if (!zeilen[j]!.n) continue;
+      if (zeilen[j]!.n !== alt[k]) break;
+      k++;
+      letzte = j;
+    }
+    if (k === alt.length) return t.slice(0, zeilen[i]!.von) + neu.replace(/\r\n/g, '\n').trim() + t.slice(zeilen[letzte]!.bis);
+  }
+  return null;
+}
+
+/**
+ * Entwurf ohne neuen Text (A-2412): nur die Signatur wird angefasst. Weicht die gefundene (Marker oder alter Trenner
+ * "-- ", nur vor dem Zitat) von der eingestellten ab, steht an ihrer Stelle die aktuelle, in HTML und Text. Text davor,
+ * Zitat und alles andere bleiben Zeichen für Zeichen. Keine Signatur im Entwurf oder schon die aktuelle: nichts ändert sich.
+ */
+function tauscheSignatur(alt: { text: string; html: string | null }, sig: { text: string; html: string; bilder: Anhang[] } | null): Ersetzt {
+  const unveraendert: Ersetzt = { text: alt.text, html: alt.html ?? `<div>${esc(alt.text).replace(/\n/g, '<br>')}</div>`, behalten: true, signaturNeu: false, zitatBehalten: true, bilder: [] };
+  if (!sig || !alt.html) return unveraendert;
+  const zh = zitatStartHtml(alt.html);
+  const bodyEnde = alt.html.lastIndexOf('</body>');
+  const ende = zh >= 0 ? zh : bodyEnde >= 0 ? bodyEnde : alt.html.length;
+  const kopf = alt.html.slice(0, ende);
+  const mi = kopf.indexOf(SIG_MARKER);
+  const start = mi >= 0 ? mi : kopf.indexOf('<div>-- <br>');
+  if (start < 0) return unveraendert;
+  const gefunden = kopf.slice(start);
+  if (signaturGleich(gefunden, sig.html)) return unveraendert;
+  const html = alt.html.slice(0, start) + sig.html + alt.html.slice(ende);
+  // Die alte Signatur im Text ist der Text des gefundenen HTML-Blocks. Nicht zu finden: der Text-Teil bleibt, wie er ist.
+  const text = tauscheTextBlock(alt.text, htmlZuText(gefunden), sig.text) ?? alt.text;
+  return { text, html, behalten: false, signaturNeu: true, zitatBehalten: true, bilder: sig.bilder };
+}
+
 /**
  * Neuer Text für einen bestehenden Entwurf (A-2401). Erst wird das Zitat erkannt, die Signatur nur davor gesucht: eine
  * Signatur im zitierten Verlauf zählt nie. Erkannt wird sie im HTML am Marker (SIG_MARKER) oder am alten Trenner
  * "-- ", im Text als Block sig.text (nbsp, Umbruch und Leerraum egal). Nicht erkannt: die aktuelle Signatur kommt neu
  * hinein, statt wegzufallen. Das Zitat bleibt immer, wenn es zu finden ist.
  */
-export function ersetzeText(alt: { text: string; html: string | null }, neu: string, sig: { text: string; html: string; bilder: Anhang[] } | null = null): Ersetzt {
+export function ersetzeText(alt: { text: string; html: string | null }, neu: string | null, sig: { text: string; html: string; bilder: Anhang[] } | null = null): Ersetzt {
+  if (neu === null) return tauscheSignatur(alt, sig);
   const t = alt.text.replace(/\r\n/g, '\n');
   const body = neu.trimEnd();
   const bodyEnde = (h: string): number => {
@@ -244,7 +304,8 @@ export function ersetzeText(alt: { text: string; html: string | null }, neu: str
   let behalten = false;
   const mi = kopfHtml.indexOf(SIG_MARKER);
   const ti = mi < 0 ? kopfHtml.indexOf('<div>-- <br>') : -1;
-  if (mi >= 0 || ti >= 0) {
+  // Eine gefundene Signatur, die von der eingestellten abweicht (alte Textsignatur, älterer Stand), gilt als nicht erkannt: die aktuelle kommt neu.
+  if ((mi >= 0 || ti >= 0) && !(sig && !signaturGleich(kopfHtml.slice(mi >= 0 ? mi : ti), sig.html))) {
     sigHtml = kopfHtml.slice(mi >= 0 ? mi : ti);
     behalten = true;
   }
