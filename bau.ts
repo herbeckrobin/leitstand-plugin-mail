@@ -184,7 +184,8 @@ export function ersetzeText(alt: { text: string; html: string | null }, neu: str
   let hi = alt.html.indexOf(SIG_MARKER);
   let ti = -1;
   if (hi >= 0) {
-    const s = sigText.trim();
+    // Der Entwurfstext ist nach dem Lesen LF-normalisiert, die Signatur aus der Einstellung kann CRLF tragen (A-2389).
+    const s = sigText.replace(/\r\n/g, '\n').trim();
     ti = s ? t.indexOf(`\n\n${s}`) : -1;
     if (ti >= 0) {
       const hEnde = alt.html.lastIndexOf('</body>');
