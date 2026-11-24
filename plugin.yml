@@ -1,5 +1,5 @@
 name: mail
-version: "1.5.3"
+version: "1.5.4"
 titel: Mail
 beschreibung: "Mail über IMAP (Mailcow, Google per App-Passwort): lesen, suchen, Entwürfe anlegen, ändern und verschieben. Robin schickt Entwürfe selbst ab, Versand gibt es nicht. Der Wächter meldet neue Mails per IDLE als Ereignis mail.neu. Dazu Lesewerkzeuge für den Kern und eine Kontoprüfung."
 start: [bun, dist/server.js]
@@ -49,10 +49,10 @@ einstellungen:
     pflicht: true
   signatur_html:
     typ: string
-    titel: Signatur als HTML für Entwürfe
+    titel: Signatur als HTML für Entwürfe, ohne Gruß
   signatur_text:
     typ: string
-    titel: Signatur als Klartext für den Textteil
+    titel: Signatur als Klartext für den Textteil, ohne Gruß
     empfohlen: true
   absender_name:
     typ: string

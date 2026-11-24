@@ -70,7 +70,7 @@ Nicht gebaut: Vorschau auf der Review-Karte und die Tagesablauf-Einstellung (ADR
 - `passwoerter` (Pflicht, geheim): JSON-Objekt Kontoname auf Passwort, Google mit App-Passwort. Nur das Fenster trägt es ein (Schlüsselbund). Ein Parsefehler nennt nie einen Teil des Werts.
 - `triage_an` (Standard aus), `triage_takt_min` (Standard 10): Mail-Triage im Takt, siehe "Takt und Aktionen".
 - `absender_name` (empfohlen, ohne Standard): From-Name für Konten ohne `anzeigename`. Fehlt auch er, trägt der From-Kopf nur die Adresse.
-- `signatur_html`, `signatur_text` (`signatur_text` empfohlen): Signatur für Entwürfe. `signatur_text` allein genügt (HTML wird daraus gebaut), mit `signatur_html` dient `signatur_text` als Textteil. Beide leer: kein Gruß.
+- `signatur_html`, `signatur_text` (`signatur_text` empfohlen): Signatur für Entwürfe. `signatur_text` allein genügt (HTML wird daraus gebaut), mit `signatur_html` dient `signatur_text` als Textteil. Die Signatur trägt keinen Gruß: Gruß und Vorname gehören ans Ende des Entwurfstexts, die Signatur kommt danach mit Name, Zeile und Kontakt. Beide leer: keine Signatur.
 
 Beispiel `konten` (ohne Zugangsdaten):
 

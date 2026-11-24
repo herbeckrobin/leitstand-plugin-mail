@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-sigtausch/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-grusstext/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-sigtausch/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-grusstext/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -110810,7 +110810,7 @@ function mailWerkzeuge(o) {
           ...kontoSchema,
           ordner: ordnerSchema,
           uid: uidSchema,
-          text: { type: "string", description: "Antworttext ohne Gru\xDF-Signatur, die kommt automatisch" },
+          text: { type: "string", description: "Antworttext inklusive Gru\xDF und Vorname, die Signatur kommt danach automatisch" },
           allen: { type: "boolean", description: "Allen antworten, Standard false" },
           signatur: { type: "boolean", description: "Signatur anh\xE4ngen, Standard true" },
           anhaenge: pfadListe
@@ -110838,7 +110838,7 @@ function mailWerkzeuge(o) {
       beschreibung: "Neuen Entwurf (ohne Verlauf) mit optionalen Anh\xE4ngen in den Entw\xFCrfe-Ordner legen. Sendet nicht.",
       schema: {
         type: "object",
-        properties: { ...kontoSchema, an: adrListe("Empf\xE4nger"), cc: adrListe("Kopie"), betreff: { type: "string" }, text: { type: "string" }, signatur: { type: "boolean", description: "Standard true" }, anhaenge: pfadListe },
+        properties: { ...kontoSchema, an: adrListe("Empf\xE4nger"), cc: adrListe("Kopie"), betreff: { type: "string" }, text: { type: "string", description: "Text inklusive Gru\xDF und Vorname, die Signatur kommt danach automatisch" }, signatur: { type: "boolean", description: "Standard true" }, anhaenge: pfadListe },
         required: ["an", "betreff", "text"]
       },
       aufruf: async (a, wer) => {
@@ -110876,7 +110876,7 @@ function mailWerkzeuge(o) {
         properties: {
           ...kontoSchema,
           uid: { type: "integer", minimum: 1, description: "UID des Entwurfs im Entw\xFCrfe-Ordner" },
-          text: { type: "string" },
+          text: { type: "string", description: "Text inklusive Gru\xDF und Vorname, die Signatur kommt danach automatisch" },
           betreff: { type: "string" },
           an: adrListe("Neue Empf\xE4nger, ersetzt die alten"),
           cc: adrListe("Neue Kopie-Empf\xE4nger, ersetzt die alten"),
@@ -111157,7 +111157,7 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.5.3";
+var VERSION = "1.5.4";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {
