@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-absender/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-datenort/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-absender/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-datenort/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -111057,7 +111057,7 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.5.0";
+var VERSION = "1.5.1";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {
@@ -111139,8 +111139,21 @@ function starteWaechter(o) {
   o.log(`W\xE4chter: ${aus.length} von ${k.wert.length} Konten`);
   return aus;
 }
+function datenOrdner(env2) {
+  const d = env2.PLUGIN_DATEN?.trim();
+  if (!d)
+    throw new Error("PLUGIN_DATEN fehlt: der Leitstand \xFCbergibt den Datenordner, ohne ihn startet das Mail-Plugin nicht");
+  return d;
+}
 if (import.meta.main) {
-  const daten = join5(process.cwd(), "daten");
+  let daten;
+  try {
+    daten = datenOrdner(process.env);
+  } catch (e) {
+    process.stderr.write(`${e instanceof Error ? e.message : String(e)}
+`);
+    process.exit(1);
+  }
   const log3 = (z) => void process.stderr.write(`${new Date().toISOString()} ${z}
 `);
   const schreibe = (j) => void process.stdout.write(`${JSON.stringify(j)}
@@ -111203,5 +111216,6 @@ if (import.meta.main) {
 export {
   verarbeite,
   starteWaechter,
-  lokaleWerkzeuge
+  lokaleWerkzeuge,
+  datenOrdner
 };
