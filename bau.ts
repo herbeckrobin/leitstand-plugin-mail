@@ -171,35 +171,105 @@ export function baueAntwort(e: { original: Original; absender: Absender; text: s
   });
 }
 
+/** Vergleichsform für Signaturtexte: LF, nbsp als Leerzeichen, Leerraum je Zeile zusammengezogen (Thunderbird und SOGo brechen und füllen um). */
+const vergleich = (s: string): string =>
+  s
+    .replace(/\r\n/g, '\n')
+    .replace(/ /g, ' ')
+    .split('\n')
+    .map((z) => z.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .trim();
+
+/** Beginn des Zitats im Text: Kopfzeile "Am … schrieb", "On … wrote", Outlook-Trenner, sonst der erste >-Block. -1 ohne Zitat. */
+function zitatStartText(t: string): number {
+  const kopf = /^(?:Am [^\n]*schrieb|On [^\n]*wrote|-{3,} ?(?:Original|Ursprüngliche|Weitergeleitete)[^\n]*)/im.exec(t);
+  if (kopf) return kopf.index;
+  return /^>/m.exec(t)?.index ?? -1;
+}
+
 /**
- * Neuer Text für einen bestehenden Entwurf. Signatur und Zitat bleiben, wenn die Signatur zu erkennen ist: im HTML am
- * Marker (SIG_MARKER), im Text als Block sigText. Entwürfe aus der Zeit vor der HTML-Signatur trugen den Trenner
- * "-- " (Text: Zeile "-- ", HTML: <div>-- <br>), auch der gilt noch. Sonst wird der ganze Text ersetzt, behalten ist false.
+ * Beginn des Zitats im HTML: der erste blockquote oder die Kopfzeile von Thunderbird (moz-cite-prefix) und Gmail
+ * (gmail_quote) davor. Das <div><br> aus baueAntwort gehört zum Zitat. -1 ohne Zitat.
  */
-export function ersetzeText(alt: { text: string; html: string | null }, neu: string, sigText = ''): { text: string; html: string; behalten: boolean } {
+function zitatStartHtml(h: string): number {
+  const treffer = [/<div[^>]*class="moz-cite-prefix"/i, /<div[^>]*class="gmail_quote"/i, /<blockquote\b/i].map((r) => r.exec(h)?.index ?? -1).filter((i) => i >= 0);
+  if (!treffer.length) return -1;
+  const i = Math.min(...treffer);
+  return h.slice(0, i).endsWith('<div><br>') ? i - '<div><br>'.length : i;
+}
+
+export interface Ersetzt {
+  text: string;
+  html: string;
+  /** Signatur im Entwurf erkannt und übernommen. */
+  behalten: boolean;
+  /** Signatur nicht erkannt: die aktuelle Signatur wurde neu eingesetzt, was zwischen altem Text und Zitat stand, ist ersetzt. */
+  signaturNeu: boolean;
+  /** Zitat im alten Entwurf gefunden und übernommen. */
+  zitatBehalten: boolean;
+  /** Inline-Bilder der neu eingesetzten Signatur, als Anhang zu führen. */
+  bilder: Anhang[];
+}
+
+/**
+ * Neuer Text für einen bestehenden Entwurf (A-2401). Erst wird das Zitat erkannt, die Signatur nur davor gesucht: eine
+ * Signatur im zitierten Verlauf zählt nie. Erkannt wird sie im HTML am Marker (SIG_MARKER) oder am alten Trenner
+ * "-- ", im Text als Block sig.text (nbsp, Umbruch und Leerraum egal). Nicht erkannt: die aktuelle Signatur kommt neu
+ * hinein, statt wegzufallen. Das Zitat bleibt immer, wenn es zu finden ist.
+ */
+export function ersetzeText(alt: { text: string; html: string | null }, neu: string, sig: { text: string; html: string; bilder: Anhang[] } | null = null): Ersetzt {
   const t = alt.text.replace(/\r\n/g, '\n');
   const body = neu.trimEnd();
-  const voll = { text: `${body}\n`, html: html(absaetze(body)), behalten: false };
-  if (!alt.html) return voll;
-  let hi = alt.html.indexOf(SIG_MARKER);
-  let ti = -1;
-  if (hi >= 0) {
-    // Der Entwurfstext ist nach dem Lesen LF-normalisiert, die Signatur aus der Einstellung kann CRLF tragen (A-2389).
-    const s = sigText.replace(/\r\n/g, '\n').trim();
-    ti = s ? t.indexOf(`\n\n${s}`) : -1;
-    if (ti >= 0) {
-      const hEnde = alt.html.lastIndexOf('</body>');
-      const rest = alt.html.slice(hi, hEnde > hi ? hEnde : undefined);
-      return { text: `${body}${t.slice(ti)}`, html: html(`${absaetze(body)}<div><br></div>${rest}`), behalten: true };
-    }
-    return voll;
+  const bodyEnde = (h: string): number => {
+    const e = h.lastIndexOf('</body>');
+    return e >= 0 ? e : h.length;
+  };
+
+  const zt = zitatStartText(t);
+  const kopfText = zt >= 0 ? t.slice(0, zt) : t;
+  const zitatText = zt >= 0 ? t.slice(zt).trimEnd() : '';
+
+  const zh = alt.html ? zitatStartHtml(alt.html) : -1;
+  const kopfHtml = alt.html ? alt.html.slice(0, zh >= 0 ? zh : bodyEnde(alt.html)) : '';
+  let zitatHtml = alt.html && zh >= 0 ? alt.html.slice(zh, bodyEnde(alt.html)) : '';
+  // Kein Zitat im HTML (Entwurf nur als Text): das Zitat aus dem Text ins HTML übernehmen.
+  if (!zitatHtml && zitatText) {
+    const zeilen = zitatText.split('\n').map((z) => (z ? `<div>${esc(z.replace(/^> ?/, ''))}</div>` : '<div><br></div>'));
+    zitatHtml = `<div><br><blockquote type="cite">${zeilen.join('')}</blockquote></div><br>`;
   }
-  hi = alt.html.indexOf('<div>-- <br>');
-  ti = t.indexOf('\n-- \n');
-  if (ti < 0 || hi < 0) return voll;
-  const hEnde = alt.html.lastIndexOf('</body>');
-  const rest = alt.html.slice(hi, hEnde > hi ? hEnde : undefined);
-  return { text: `${body}\n${t.slice(ti)}`, html: html(`${absaetze(body)}<div><br></div>${rest}`), behalten: true };
+
+  let sigHtml: string | null = null;
+  let sigText: string | null = null;
+  let behalten = false;
+  const mi = kopfHtml.indexOf(SIG_MARKER);
+  const ti = mi < 0 ? kopfHtml.indexOf('<div>-- <br>') : -1;
+  if (mi >= 0 || ti >= 0) {
+    sigHtml = kopfHtml.slice(mi >= 0 ? mi : ti);
+    behalten = true;
+  }
+  const sNorm = sig ? vergleich(sig.text) : '';
+  if (sNorm && vergleich(kopfText).includes(sNorm)) {
+    sigText = sig!.text.replace(/\r\n/g, '\n').trim();
+    sigHtml ??= sig!.html;
+    behalten = true;
+  } else if (sigHtml) {
+    const ab = kopfText.indexOf('\n-- \n');
+    sigText = ab >= 0 ? kopfText.slice(ab + 1).trim() : htmlZuText(sigHtml).trim();
+  }
+
+  let bilder: Anhang[] = [];
+  let signaturNeu = false;
+  if (!behalten && sig) {
+    sigHtml = sig.html;
+    sigText = sig.text.replace(/\r\n/g, '\n').trim();
+    bilder = sig.bilder;
+    signaturNeu = true;
+  }
+
+  const text = `${body}\n${sigText ? `\n${sigText}\n` : ''}${zitatText ? `\n${zitatText}\n` : ''}`;
+  const h = html(`${absaetze(body)}${sigHtml || zitatHtml ? '<div><br></div>' : ''}${sigHtml ?? ''}${zitatHtml}`);
+  return { text, html: h, behalten, signaturNeu, zitatBehalten: zitatHtml !== '', bilder };
 }
 
 /** Entwurf aus fertigem Text und HTML (für entwurf_aendern), Verlaufs-Kopfzeilen werden übernommen. */

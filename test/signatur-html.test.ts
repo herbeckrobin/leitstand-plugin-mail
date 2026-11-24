@@ -68,7 +68,7 @@ describe('HTML-Signatur über 3000 Zeichen (A-2397)', () => {
     test(`entwurf_aendern auf einem ${titel}: neuer Text, HTML-Signatur und Text-Signatur bleiben`, async () => {
       const a = absender();
       const alt = await PostalMime.parse(await bau('Alter Text'));
-      const e = ersetzeText({ text: alt.text ?? '', html: alt.html ?? null }, 'Neuer Text\n\nZweiter Absatz', signaturTeil(a, true)?.text ?? '');
+      const e = ersetzeText({ text: alt.text ?? '', html: alt.html ?? null }, 'Neuer Text\n\nZweiter Absatz', signaturTeil(a, true));
       expect(e.behalten).toBe(true);
       const roh = await baueRoh({ absender: a, an: person, cc: [], betreff: 'b', text: e.text, html: e.html, anhaenge: [], session: 's' });
       const p = await PostalMime.parse(roh);
@@ -79,7 +79,7 @@ describe('HTML-Signatur über 3000 Zeichen (A-2397)', () => {
       expect(p.text).toContain('Neuer Text');
       expect((p.html!.match(/<table/g) ?? []).length).toBe(2);
       // Ein zweites Ändern verliert nichts.
-      const e2 = ersetzeText({ text: p.text ?? '', html: p.html ?? null }, 'Dritter Text', signaturTeil(a, true)?.text ?? '');
+      const e2 = ersetzeText({ text: p.text ?? '', html: p.html ?? null }, 'Dritter Text', signaturTeil(a, true));
       expect(e2.behalten).toBe(true);
       expect(e2.html).toContain(SIG_HTML);
     });

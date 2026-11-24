@@ -11,6 +11,12 @@ Das Gateway stellt `mail_` voran, im Plugin heißen sie ohne Präfix.
 - schreibend, `stufe: karte`: `anhang_speichern` (schreibt eine Datei aus einer fremden Mail auf die Platte)
 - schreibend, `stufe: frei` (Vorschlag): `als_pdf`, siehe "Mail als PDF"
 
+## Entwurf ändern, Zitat und Signatur
+
+`entwurf_aendern` mit `text` ersetzt nur den Text vor Signatur und Zitat. Das Zitat eines Antwortentwurfs bleibt immer, solange es zu finden ist (HTML: erster `blockquote` oder `moz-cite-prefix`/`gmail_quote` davor, Text: Kopfzeile "Am … schrieb" oder "On … wrote", sonst der erste `>`-Block). Die Signatur wird nur im Teil davor gesucht: im HTML am Marker `<!-- leitstand-signatur -->` oder am alten Trenner `-- `, im Text als Block der aktuellen Signatur (nbsp, Umbruch und Leerraum egal). Wird sie nicht erkannt, setzt das Werkzeug die aktuelle Signatur neu ein und ersetzt, was zwischen altem Text und Zitat stand. Antwort: `signatur_und_zitat_behalten`, `signatur_neu_gesetzt`, `zitat_behalten`.
+
+`an`, `cc` und `anhaenge` nehmen eine einzelne Adresse oder einen Pfad als Text oder eine Liste.
+
 ## Mail als PDF
 
 `als_pdf` (`konto`, `ordner`, `uid`, `ziel`) legt eine Mail als PDF unter `ziel` ab, gedacht für Rechnungen, die nur im Mailtext stehen. `ziel` ist ein neuer absoluter Pfad auf `.pdf` unter `haupt`, der Ordner muss es geben, vorhandene Dateien werden nie überschrieben, versteckte Teile sind gesperrt (dieselben Regeln wie `anhang_speichern`). Antwort: `gespeichert`, `bytes`, `fassung`.

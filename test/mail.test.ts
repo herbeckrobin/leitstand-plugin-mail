@@ -326,6 +326,32 @@ describe('Protokoll und Werkzeuge', () => {
     expect(u!.error).toBeDefined();
   });
 
+  test('A-2402: an, cc und anhaenge nehmen im Schema einen Text oder eine Liste, der Client lehnt den String nicht vorher ab', async () => {
+    const r = await verarbeite(defs(), { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    const tools = (r!.result as { tools: { name: string; inputSchema: { properties: Record<string, { type?: string; oneOf?: { type: string }[] }> } }[] }).tools;
+    const felder = [['entwurf_neu', 'an'], ['entwurf_neu', 'cc'], ['entwurf_neu', 'anhaenge'], ['antwort_entwurf', 'anhaenge'], ['entwurf_aendern', 'an'], ['entwurf_aendern', 'cc'], ['entwurf_aendern', 'anhaenge']] as const;
+    for (const [w, f] of felder) {
+      const s = tools.find((t) => t.name === w)!.inputSchema.properties[f]!;
+      expect(s.type, `${w}.${f}`).toBeUndefined();
+      expect(s.oneOf?.map((x) => x.type).sort(), `${w}.${f}`).toEqual(['array', 'string']);
+    }
+  });
+
+  test('A-2402: an als Text und als Liste ergeben denselben Entwurf', async () => {
+    const mit = async (an: unknown) => {
+      const vorher = doppel.angehaengt.length;
+      const res = await rufe('entwurf_neu', { an, cc: 'c@example.test', betreff: 'Hallo', text: 'Servus' });
+      expect(res.isError).toBeUndefined();
+      expect(doppel.angehaengt.length).toBe(vorher + 1);
+      const roh = doppel.angehaengt.at(-1)!.roh;
+      return { to: /^To:\s*(.+)$/im.exec(roh)?.[1], cc: /^Cc:\s*(.+)$/im.exec(roh)?.[1] };
+    };
+    const text = await mit('x@example.test');
+    const liste = await mit(['x@example.test']);
+    expect(text.to).toContain('x@example.test');
+    expect(text).toEqual(liste);
+  });
+
   test('entwurf_neu legt einen Entwurf im Drafts-Ordner an und versendet nichts', async () => {
     const r = await rufe('entwurf_neu', { an: ['x@example.test'], betreff: 'Hallo', text: 'Servus' });
     expect(r.isError).toBeUndefined();
