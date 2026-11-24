@@ -17,7 +17,7 @@ import { mailWerkzeuge } from './werkzeuge.ts';
 // Der Text einer Meldung enthält nur Kontoname und Zahlen, nie Betreff, Adresse oder Inhalt.
 
 const PROTOKOLL = '2025-03-26';
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 
 /** Zahlen des Ereignisses mail.neu, Form wie im Vertrag mit dem Kern (mailNeuDaten). */
 export interface MailNeuDaten {
@@ -124,8 +124,24 @@ export function starteWaechter(o: WaechterStart): Waechter[] {
   return aus;
 }
 
+/**
+ * Der Datenordner kommt allein vom Kern (PLUGIN_DATEN, A-2313). Die eigene Kopie darf nie beschrieben werden: die Baumprüfung
+ * sperrt den Start, sobald dort eine Datei dazukommt (Störung 127). Darum kein Rückfall auf cwd.
+ */
+export function datenOrdner(env: Record<string, string | undefined>): string {
+  const d = env.PLUGIN_DATEN?.trim();
+  if (!d) throw new Error('PLUGIN_DATEN fehlt: der Leitstand übergibt den Datenordner, ohne ihn startet das Mail-Plugin nicht');
+  return d;
+}
+
 if (import.meta.main) {
-  const daten = join(process.cwd(), 'daten');
+  let daten: string;
+  try {
+    daten = datenOrdner(process.env);
+  } catch (e) {
+    process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
+    process.exit(1);
+  }
   const log = (z: string): void => void process.stderr.write(`${new Date().toISOString()} ${z}\n`);
   const schreibe = (j: Json): void => void process.stdout.write(`${JSON.stringify(j)}\n`);
   const fabrik: ImapFabrik = imapFlow;
