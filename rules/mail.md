@@ -30,5 +30,5 @@ Anhänge in Entwürfen:
 
 - `anhaenge` ist eine Liste absoluter Pfade, nur unter dem Hauptverzeichnis des Leitstands (`/Volumes/Work`). Alles andere lehnt das Gateway ab, auch `/private/tmp` und das Home. Das gilt ebenso für `ziel` bei `mail_anhang_speichern`.
 - Zusammen höchstens 25 MB.
-- Die Signatur kommt automatisch. Text ohne Grußformel und Signatur übergeben.
+- Der Text endet mit Gruß und Vornamen (zum Beispiel: Beste Grüße, Vorname). Die Signatur darunter bringt nur die Karte mit Kontaktdaten, nie die Grußformel.
 - Nach dem Anlegen prüfen, nicht behaupten: `mail_lesen` auf die UID aus der Antwort, Anhangliste und Text ansehen.

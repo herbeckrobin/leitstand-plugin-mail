@@ -483,7 +483,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
           ...kontoSchema,
           ordner: ordnerSchema,
           uid: uidSchema,
-          text: { type: 'string', description: 'Antworttext ohne Gruß-Signatur, die kommt automatisch' },
+          text: { type: 'string', description: 'Antworttext inklusive Gruß und Vorname, die Signatur kommt danach automatisch' },
           allen: { type: 'boolean', description: 'Allen antworten, Standard false' },
           signatur: { type: 'boolean', description: 'Signatur anhängen, Standard true' },
           anhaenge: pfadListe,
@@ -511,7 +511,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
       beschreibung: 'Neuen Entwurf (ohne Verlauf) mit optionalen Anhängen in den Entwürfe-Ordner legen. Sendet nicht.',
       schema: {
         type: 'object',
-        properties: { ...kontoSchema, an: adrListe('Empfänger'), cc: adrListe('Kopie'), betreff: { type: 'string' }, text: { type: 'string' }, signatur: { type: 'boolean', description: 'Standard true' }, anhaenge: pfadListe },
+        properties: { ...kontoSchema, an: adrListe('Empfänger'), cc: adrListe('Kopie'), betreff: { type: 'string' }, text: { type: 'string', description: 'Text inklusive Gruß und Vorname, die Signatur kommt danach automatisch' }, signatur: { type: 'boolean', description: 'Standard true' }, anhaenge: pfadListe },
         required: ['an', 'betreff', 'text'],
       },
       aufruf: async (a, wer) => {
@@ -548,7 +548,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
         properties: {
           ...kontoSchema,
           uid: { type: 'integer', minimum: 1, description: 'UID des Entwurfs im Entwürfe-Ordner' },
-          text: { type: 'string' },
+          text: { type: 'string', description: 'Text inklusive Gruß und Vorname, die Signatur kommt danach automatisch' },
           betreff: { type: 'string' },
           an: adrListe('Neue Empfänger, ersetzt die alten'),
           cc: adrListe('Neue Kopie-Empfänger, ersetzt die alten'),
