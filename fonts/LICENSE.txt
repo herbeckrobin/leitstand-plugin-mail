@@ -1,0 +1,7 @@
+Liberation Sans (Regular und Bold)
+
+Urheberhinweise laut Schriftdatei: Copyright (c) 2010 Google Corporation, Copyright (c) 2012 Red Hat, Inc.
+
+Lizenz: SIL Open Font License, Version 1.1. Die Schrift darf frei genutzt, kopiert, eingebettet und weitergegeben werden,
+auch in einem PDF. Der Volltext steht unter https://openfontlicense.org/open-font-license-official-text/ .
+Die Dateien sind unverändert aus LibreOffice (Contents/Resources/fonts/truetype) übernommen.

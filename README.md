@@ -9,6 +9,15 @@ Das Gateway stellt `mail_` voran, im Plugin heißen sie ohne Präfix.
 - lesend (`stufe: frei`): `posteingang`, `suchen`, `lesen`, `entwuerfe_liste`, dazu die Kernwerkzeuge `neue_seit`, `nachhol_zaehle`, `entwurf_finde`, `gesendet_finde`, `konto_pruefe` (unten)
 - schreibend, `stufe: frei`: `entwurf_neu`, `antwort_entwurf`, `entwurf_aendern`, `entwurf_loeschen`, `verschieben`, `triage_merke`
 - schreibend, `stufe: karte`: `anhang_speichern` (schreibt eine Datei aus einer fremden Mail auf die Platte)
+- schreibend, `stufe: frei` (Vorschlag): `als_pdf`, siehe "Mail als PDF"
+
+## Mail als PDF
+
+`als_pdf` (`konto`, `ordner`, `uid`, `ziel`) legt eine Mail als PDF unter `ziel` ab, gedacht für Rechnungen, die nur im Mailtext stehen. `ziel` ist ein neuer absoluter Pfad auf `.pdf` unter `haupt`, der Ordner muss es geben, vorhandene Dateien werden nie überschrieben, versteckte Teile sind gesperrt (dieselben Regeln wie `anhang_speichern`). Antwort: `gespeichert`, `bytes`, `fassung`.
+
+- **Fassung `text`**: Kopf mit Von, Datum, Betreff, darunter der Text der Mail (HTML, sonst Plaintext) als Überschriften, Absätze, Listen und einfache Tabellen mit durchsuchbarer Textebene. Bilder und das Layout der Mail fallen weg. Das HTML wird nur zu Text gelesen: Skript, Style, Frames und Bilder werden verworfen, nichts wird nachgeladen, es gibt kein Netz.
+- **Naht**: `pdf.ts` baut das Dokument (Kopf und Blöcke aus `html.ts`) und reicht es an einen `PdfRenderer`. Ein Browser-Renderer könnte später dieselbe Schnittstelle bedienen, ohne dass Werkzeug oder Tests sich ändern. Er bräuchte im Kern ein Recht, ein Programm zu starten, und ist darum nicht Teil dieser Version.
+- **Schrift**: Liberation Sans Regular und Bold unter `fonts/`, SIL Open Font License 1.1 (`fonts/LICENSE.txt`), zusammen rund 0,8 MB.
 
 Die Stufen sind der Vorschlag aus dem bisherigen Gateway-Modul (10 frei, 1 Karte), die fünf Kernwerkzeuge sind lesend und `frei`. Bei Aufnahme und Update zeigt die Karte sie, Robin bestätigt oder ändert sie.
 
@@ -67,7 +76,7 @@ Beispiel `konten` (ohne Zugangsdaten):
 
 ## Rechte
 
-- lesen und schreiben: `haupt` (Quelle für Anhänge eines Entwurfs, Ziel für `anhang_speichern`, nie versteckte Teile wie `.env` oder `.git`)
+- lesen und schreiben: `haupt` (Quelle für Anhänge eines Entwurfs, Ziel für `anhang_speichern` und `als_pdf`, nie versteckte Teile wie `.env` oder `.git`)
 - Netz: `mail.robinherbeck.com`, `imap.gmail.com` (der Leitstand kennt nur Ja oder Nein, keine Host-Trennung je Konto)
 - Daten: `daten/` im Plugin-Ordner (UIDNEXT-Stand je Konto, Triage-Merkliste), nicht im Repo. Bei einem Update bleibt der alte Stand als `<name>.alt`, der Wächter setzt dann eine Basis ohne Zählung.
 

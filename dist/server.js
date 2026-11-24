@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-entwurfzitat/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailpdf/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-entwurfzitat/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-mailpdf/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -46715,7 +46715,196 @@ function imapClient(o) {
 }
 
 // werkzeuge.ts
-import { readFileSync as readFileSync5, statSync, writeFileSync as writeFileSync5 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync5, statSync, writeFileSync as writeFileSync5 } from "fs";
+
+// html.ts
+var ENTITIES = {
+  nbsp: " ",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  middot: "\xB7",
+  rarr: "\u2192",
+  larr: "\u2190",
+  euro: "\u20AC",
+  copy: "\xA9",
+  reg: "\xAE",
+  hellip: "\u2026",
+  ndash: "-",
+  mdash: "-",
+  bull: "\u2022",
+  auml: "\xE4",
+  ouml: "\xF6",
+  uuml: "\xFC",
+  Auml: "\xC4",
+  Ouml: "\xD6",
+  Uuml: "\xDC",
+  szlig: "\xDF"
+};
+function entitaeten(s) {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+\d*);/gi, (m, e) => {
+    if (e[0] === "#") {
+      const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isInteger(n) && n > 31 && n < 1114112 && !(n >= 55296 && n <= 57343) ? String.fromCodePoint(n) : "";
+    }
+    return ENTITIES[e] ?? m;
+  });
+}
+var bereinige = (t) => entitaeten(t).replace(/[\u200B-\u200F\u2060\uFEFF\u00AD]/g, "").replace(/[ \t\r\n\u00A0]+/g, " ").trim();
+var BLOCK_TAGS = new Set(["p", "div", "section", "article", "header", "footer", "blockquote", "pre", "center", "address"]);
+var WEG = /<(script|style|head|title|svg|object|iframe|noscript)\b[\s\S]*?<\/\1\s*>/gi;
+function htmlZuBloecken(html) {
+  const quelle = html.replace(/<!--[\s\S]*?-->/g, "").replace(WEG, "");
+  const ausgabe = [];
+  let text3 = "";
+  let liste = null;
+  let itemOffen = false;
+  const tabellen = [];
+  const aktuell = () => tabellen[tabellen.length - 1];
+  const schreibe = (t) => {
+    const tab = aktuell();
+    if (tab && tab.zelle !== null)
+      tab.zelle += t;
+    else
+      text3 += t;
+  };
+  const absatzEnde = () => {
+    if (aktuell() && aktuell().zelle !== null) {
+      aktuell().zelle += " ";
+      return;
+    }
+    const t = bereinige(text3);
+    text3 = "";
+    if (!t)
+      return;
+    if (liste && itemOffen)
+      liste.push(t);
+    else
+      ausgabe.push({ art: "absatz", text: t });
+  };
+  const listeEnde = () => {
+    absatzEnde();
+    itemOffen = false;
+    if (liste?.length)
+      ausgabe.push({ art: "liste", punkte: liste });
+    liste = null;
+  };
+  const zelleEnde = () => {
+    const tab = aktuell();
+    if (tab?.zelle === null || !tab)
+      return;
+    tab.zeile ??= [];
+    tab.zeile.push(bereinige(tab.zelle));
+    tab.zelle = null;
+  };
+  const zeileEnde = () => {
+    const tab = aktuell();
+    if (!tab)
+      return;
+    zelleEnde();
+    if (tab.zeile?.some((z) => z))
+      tab.zeilen.push(tab.zeile);
+    tab.zeile = null;
+  };
+  const tabelleEnde = () => {
+    zeileEnde();
+    const tab = tabellen.pop();
+    if (tab?.zeilen.length)
+      ausgabe.push({ art: "tabelle", zeilen: tab.zeilen });
+  };
+  const re = /<(\/?)([a-z][a-z0-9]*)\b[^>]*?(\/?)>|([^<]+|<)/gi;
+  let m;
+  while (m = re.exec(quelle)) {
+    if (m[4] !== undefined) {
+      schreibe(m[4] === "<" ? "<" : m[4]);
+      continue;
+    }
+    const zu = m[1] === "/";
+    const tag2 = m[2].toLowerCase();
+    if (tag2 === "br") {
+      if (aktuell() && aktuell().zelle !== null)
+        aktuell().zelle += " ";
+      else
+        absatzEnde();
+    } else if (/^h[1-6]$/.test(tag2)) {
+      if (!zu)
+        absatzEnde();
+      else {
+        const t = bereinige(text3);
+        text3 = "";
+        if (aktuell() && aktuell().zelle !== null)
+          continue;
+        if (t)
+          ausgabe.push({ art: "ueberschrift", stufe: Number(tag2[1]), text: t });
+      }
+    } else if (tag2 === "ul" || tag2 === "ol") {
+      if (zu)
+        listeEnde();
+      else {
+        listeEnde();
+        liste = [];
+      }
+    } else if (tag2 === "li") {
+      absatzEnde();
+      if (!zu) {
+        liste ??= [];
+        itemOffen = true;
+      } else
+        itemOffen = false;
+    } else if (tag2 === "table") {
+      if (zu)
+        tabelleEnde();
+      else {
+        absatzEnde();
+        tabellen.push({ zeilen: [], zeile: null, zelle: null });
+      }
+    } else if (tag2 === "tr") {
+      if (zu)
+        zeileEnde();
+      else if (aktuell())
+        zeileEnde();
+    } else if (tag2 === "td" || tag2 === "th") {
+      if (!aktuell())
+        continue;
+      if (zu)
+        zelleEnde();
+      else {
+        zelleEnde();
+        aktuell().zelle = "";
+      }
+    } else if (BLOCK_TAGS.has(tag2)) {
+      absatzEnde();
+    }
+  }
+  while (tabellen.length)
+    tabelleEnde();
+  listeEnde();
+  absatzEnde();
+  return ausgabe;
+}
+function textZuBloecken(text3) {
+  return text3.replace(/\r\n?/g, `
+`).split(/\n{2,}/).map((a) => a.split(`
+`).map((z) => z.replace(/[ \t]+/g, " ").trim()).join(`
+`).trim()).filter(Boolean).map((t) => ({ art: "absatz", text: t }));
+}
+
+// pdf.ts
+var MAX_BLOECKE = 5000;
+var datumText = (d) => d && !Number.isNaN(d.getTime()) ? new Intl.DateTimeFormat("de-DE", { dateStyle: "full", timeStyle: "short", timeZone: "Europe/Berlin" }).format(d) : "";
+function baueDokument(m) {
+  let bloecke = m.html ? htmlZuBloecken(m.html) : [];
+  if (!bloecke.length && m.text)
+    bloecke = textZuBloecken(m.text);
+  return {
+    kopf: { von: m.von, datum: datumText(m.datum), betreff: m.betreff || "(ohne Betreff)" },
+    bloecke: bloecke.slice(0, MAX_BLOECKE)
+  };
+}
+
+// werkzeuge.ts
 import { join as join3 } from "path";
 
 // node_modules/postal-mime/dist/esm/decode-strings.js
@@ -58424,6 +58613,40 @@ function mailWerkzeuge(o) {
       }
     },
     {
+      name: "mail_als_pdf",
+      beschreibung: "Eine Mail als PDF-Textfassung unter ziel ablegen (f\xFCr Rechnungen, die nur im Mailtext stehen). Oben ein Kopf mit Von, Datum und Betreff, darunter der Text der Mail mit Abs\xE4tzen, Listen und einfachen Tabellen, durchsuchbar. Bilder und das Layout der Mail fallen weg, nichts wird aus dem Netz geladen. ziel ist ein neuer absoluter Dateipfad auf .pdf, der Ordner muss es geben. \xDCberschreibt nie.",
+      schema: { type: "object", properties: { ...kontoSchema, ordner: ordnerSchema, uid: uidSchema, ziel: { type: "string", description: "Absoluter Pfad der neuen PDF-Datei (.pdf)" } }, required: ["uid", "ziel"] },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const uid = zahl2(a, "uid", null);
+        const ziel = str(a, "ziel", true);
+        if (!/\.pdf$/i.test(ziel))
+          throw new WerkzeugFehler("ziel muss auf .pdf enden");
+        const g = pruefePfad(ziel, wurzeln);
+        if (g)
+          throw new WerkzeugFehler(g);
+        if (existsSync2(ziel))
+          throw new WerkzeugFehler(`${ziel} gibt es schon, nichts \xFCberschrieben`);
+        if (!o.pdf)
+          throw new WerkzeugFehler("PDF-Renderer ist nicht eingerichtet");
+        const renderer = o.pdf;
+        return k.verbindung.mit(async (c) => {
+          const pfad = await ordnerPruefen(k, c, str(a, "ordner") ?? "INBOX");
+          const { p } = await imOrdner(c, pfad, () => hole(c, uid));
+          const von = flach(p.from)[0];
+          const inhalt = await renderer.rendere(baueDokument({ von: von ? von.name ? `${von.name} <${von.address}>` : von.address : "", datum: p.date ? new Date(p.date) : null, betreff: p.subject ?? "", html: p.html ?? null, text: p.text ?? null }));
+          try {
+            writeFileSync5(ziel, inhalt, { flag: "wx", mode: 420 });
+          } catch (e) {
+            if (e.code === "EEXIST")
+              throw new WerkzeugFehler(`${ziel} gibt es schon, nichts \xFCberschrieben`);
+            throw new WerkzeugFehler("Datei lie\xDF sich nicht schreiben");
+          }
+          return { gespeichert: ziel, bytes: inhalt.length, fassung: renderer.fassung };
+        });
+      }
+    },
+    {
       name: "mail_antwort_entwurf",
       beschreibung: "Antwort-Entwurf im Verlauf (In-Reply-To, References, Zitat, Signatur) in den Entw\xFCrfe-Ordner legen. Sendet nicht.",
       schema: {
@@ -58779,7 +59002,7 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.3.1";
+var VERSION = "1.4.0";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {

@@ -1,4 +1,5 @@
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { baueDokument, type PdfRenderer } from './pdf.ts';
 import { join } from 'node:path';
 import PostalMime from 'postal-mime';
 import { Strukturiert, WerkzeugFehler, type Aufrufer, type Werkzeug } from './typen.ts';
@@ -31,6 +32,8 @@ export interface MailOrt {
   wurzeln?: Wurzeln;
   /** Datei der Triage-Merkliste (mail_triage_merke). Ohne sie meldet das Werkzeug, dass es nicht eingerichtet ist. */
   triageDatei?: () => string | null;
+  /** Renderer für mail_als_pdf (Naht, siehe pdf.ts). Ohne ihn lehnt das Werkzeug ab. */
+  pdf?: PdfRenderer;
 }
 
 const MAX_ANZAHL = 100;
@@ -434,6 +437,38 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
             throw new WerkzeugFehler('Datei ließ sich nicht schreiben');
           }
           return { gespeichert: ziel, bytes: inhalt.length, typ: x.mimeType };
+        });
+      },
+    },
+    {
+      name: 'mail_als_pdf',
+      beschreibung:
+        'Eine Mail als PDF-Textfassung unter ziel ablegen (für Rechnungen, die nur im Mailtext stehen). Oben ein Kopf mit Von, Datum und Betreff, darunter der Text der Mail mit Absätzen, Listen und einfachen Tabellen, durchsuchbar. Bilder und das Layout der Mail fallen weg, nichts wird aus dem Netz geladen. ziel ist ein neuer absoluter Dateipfad auf .pdf, der Ordner muss es geben. Überschreibt nie.',
+      schema: { type: 'object', properties: { ...kontoSchema, ordner: ordnerSchema, uid: uidSchema, ziel: { type: 'string', description: 'Absoluter Pfad der neuen PDF-Datei (.pdf)' } }, required: ['uid', 'ziel'] },
+      aufruf: async (a) => {
+        const k = konto(a);
+        const uid = zahl(a, 'uid', null);
+        const ziel = str(a, 'ziel', true);
+        if (!/\.pdf$/i.test(ziel)) throw new WerkzeugFehler('ziel muss auf .pdf enden');
+        const g = pruefePfad(ziel, wurzeln);
+        if (g) throw new WerkzeugFehler(g);
+        if (existsSync(ziel)) throw new WerkzeugFehler(`${ziel} gibt es schon, nichts überschrieben`);
+        if (!o.pdf) throw new WerkzeugFehler('PDF-Renderer ist nicht eingerichtet');
+        const renderer = o.pdf;
+        return k.verbindung.mit(async (c) => {
+          const pfad = await ordnerPruefen(k, c, str(a, 'ordner') ?? 'INBOX');
+          const { p } = await imOrdner(c, pfad, () => hole(c, uid));
+          const von = flach(p.from)[0];
+          const inhalt = await renderer.rendere(
+            baueDokument({ von: von ? (von.name ? `${von.name} <${von.address}>` : von.address) : '', datum: p.date ? new Date(p.date) : null, betreff: p.subject ?? '', html: p.html ?? null, text: p.text ?? null }),
+          );
+          try {
+            writeFileSync(ziel, inhalt, { flag: 'wx', mode: 0o644 });
+          } catch (e) {
+            if ((e as { code?: string }).code === 'EEXIST') throw new WerkzeugFehler(`${ziel} gibt es schon, nichts überschrieben`);
+            throw new WerkzeugFehler('Datei ließ sich nicht schreiben');
+          }
+          return { gespeichert: ziel, bytes: inhalt.length, fassung: renderer.fassung };
         });
       },
     },

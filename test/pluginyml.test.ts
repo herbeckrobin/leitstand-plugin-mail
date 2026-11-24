@@ -45,6 +45,7 @@ const WERKZEUGE = [
   'verschieben',
   'triage_merke',
   'takt',
+  'als_pdf',
   'anhang_speichern',
 ];
 // Felder aus dem Vertrag mit dem Kern (A-2282): leseYml auf main kennt takt, aktionen, hinweise, roh und

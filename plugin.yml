@@ -1,5 +1,5 @@
 name: mail
-version: "1.3.1"
+version: "1.4.0"
 titel: Mail
 beschreibung: "Mail über IMAP (Mailcow, Google per App-Passwort): lesen, suchen, Entwürfe anlegen, ändern und verschieben. Robin schickt Entwürfe selbst ab, Versand gibt es nicht. Der Wächter meldet neue Mails per IDLE als Ereignis mail.neu. Dazu Lesewerkzeuge für den Kern und eine Kontoprüfung."
 start: [bun, dist/server.js]
@@ -26,6 +26,7 @@ werkzeuge:
   verschieben: { art: schreiben, stufe: frei, text: "Verschiebt Mails in einen anderen Ordner" }
   triage_merke: { art: schreiben, stufe: frei, text: "Merkt, was die Poststelle aus einer Mail gemacht hat" }
   takt: { art: schreiben, stufe: frei, nur_dienst: true, text: "Takt des Kerns: Triage, Entwurf-Prüfer, Nachholen. Löst Aktionen aus, keine Rolle ruft es" }
+  als_pdf: { art: schreiben, stufe: frei, text: "Legt eine Mail als PDF-Textfassung (ohne Bilder) in eine neue Datei unter dem Hauptverzeichnis, überschreibt nie" }
   anhang_speichern:
     art: schreiben
     stufe: karte
