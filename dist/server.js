@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-datenort/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-zitat/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-datenort/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-zitat/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -110207,39 +110207,80 @@ ${zitat(o.text)}
     headers: entwurfKoepfe(e.session)
   });
 }
-function ersetzeText(alt, neu, sigText = "") {
+var vergleich = (s) => s.replace(/\r\n/g, `
+`).replace(/\u00A0/g, " ").split(`
+`).map((z) => z.replace(/[ \t]+/g, " ").trim()).join(`
+`).trim();
+function zitatStartText(t2) {
+  const kopf = /^(?:Am [^\n]*schrieb|On [^\n]*wrote|-{3,} ?(?:Original|Urspr\u00FCngliche|Weitergeleitete)[^\n]*)/im.exec(t2);
+  if (kopf)
+    return kopf.index;
+  return /^>/m.exec(t2)?.index ?? -1;
+}
+function zitatStartHtml(h) {
+  const treffer = [/<div[^>]*class="moz-cite-prefix"/i, /<div[^>]*class="gmail_quote"/i, /<blockquote\b/i].map((r) => r.exec(h)?.index ?? -1).filter((i5) => i5 >= 0);
+  if (!treffer.length)
+    return -1;
+  const i4 = Math.min(...treffer);
+  return h.slice(0, i4).endsWith("<div><br>") ? i4 - "<div><br>".length : i4;
+}
+function ersetzeText(alt, neu, sig = null) {
   const t2 = alt.text.replace(/\r\n/g, `
 `);
   const body = neu.trimEnd();
-  const voll = { text: `${body}
-`, html: html(absaetze(body)), behalten: false };
-  if (!alt.html)
-    return voll;
-  let hi = alt.html.indexOf(SIG_MARKER);
-  let ti = -1;
-  if (hi >= 0) {
-    const s = sigText.replace(/\r\n/g, `
-`).trim();
-    ti = s ? t2.indexOf(`
-
-${s}`) : -1;
-    if (ti >= 0) {
-      const hEnde2 = alt.html.lastIndexOf("</body>");
-      const rest2 = alt.html.slice(hi, hEnde2 > hi ? hEnde2 : undefined);
-      return { text: `${body}${t2.slice(ti)}`, html: html(`${absaetze(body)}<div><br></div>${rest2}`), behalten: true };
-    }
-    return voll;
+  const bodyEnde = (h2) => {
+    const e = h2.lastIndexOf("</body>");
+    return e >= 0 ? e : h2.length;
+  };
+  const zt = zitatStartText(t2);
+  const kopfText = zt >= 0 ? t2.slice(0, zt) : t2;
+  const zitatText = zt >= 0 ? t2.slice(zt).trimEnd() : "";
+  const zh = alt.html ? zitatStartHtml(alt.html) : -1;
+  const kopfHtml = alt.html ? alt.html.slice(0, zh >= 0 ? zh : bodyEnde(alt.html)) : "";
+  let zitatHtml = alt.html && zh >= 0 ? alt.html.slice(zh, bodyEnde(alt.html)) : "";
+  if (!zitatHtml && zitatText) {
+    const zeilen = zitatText.split(`
+`).map((z) => z ? `<div>${esc(z.replace(/^> ?/, ""))}</div>` : "<div><br></div>");
+    zitatHtml = `<div><br><blockquote type="cite">${zeilen.join("")}</blockquote></div><br>`;
   }
-  hi = alt.html.indexOf("<div>-- <br>");
-  ti = t2.indexOf(`
+  let sigHtml = null;
+  let sigText = null;
+  let behalten = false;
+  const mi = kopfHtml.indexOf(SIG_MARKER);
+  const ti = mi < 0 ? kopfHtml.indexOf("<div>-- <br>") : -1;
+  if (mi >= 0 || ti >= 0) {
+    sigHtml = kopfHtml.slice(mi >= 0 ? mi : ti);
+    behalten = true;
+  }
+  const sNorm = sig ? vergleich(sig.text) : "";
+  if (sNorm && vergleich(kopfText).includes(sNorm)) {
+    sigText = sig.text.replace(/\r\n/g, `
+`).trim();
+    sigHtml ??= sig.html;
+    behalten = true;
+  } else if (sigHtml) {
+    const ab = kopfText.indexOf(`
 -- 
 `);
-  if (ti < 0 || hi < 0)
-    return voll;
-  const hEnde = alt.html.lastIndexOf("</body>");
-  const rest = alt.html.slice(hi, hEnde > hi ? hEnde : undefined);
-  return { text: `${body}
-${t2.slice(ti)}`, html: html(`${absaetze(body)}<div><br></div>${rest}`), behalten: true };
+    sigText = ab >= 0 ? kopfText.slice(ab + 1).trim() : htmlZuText(sigHtml).trim();
+  }
+  let bilder = [];
+  let signaturNeu = false;
+  if (!behalten && sig) {
+    sigHtml = sig.html;
+    sigText = sig.text.replace(/\r\n/g, `
+`).trim();
+    bilder = sig.bilder;
+    signaturNeu = true;
+  }
+  const text4 = `${body}
+${sigText ? `
+${sigText}
+` : ""}${zitatText ? `
+${zitatText}
+` : ""}`;
+  const h = html(`${absaetze(body)}${sigHtml || zitatHtml ? "<div><br></div>" : ""}${sigHtml ?? ""}${zitatHtml}`);
+  return { text: text4, html: h, behalten, signaturNeu, zitatBehalten: zitatHtml !== "", bilder };
 }
 function baueRoh(e) {
   return baue({
@@ -110538,8 +110579,9 @@ function mailWerkzeuge(o) {
   const kartenHinweis = (konto2, e, art) => `F\xFCr die Review-Karte zu diesem Entwurf netz_karte_neu mit typ review und diesem Feld aufrufen: entwurf ${JSON.stringify({ konto: konto2, uid: e.uid, uuid: e.uuid, art })}. Dann zeigt der Leitstand Signatur, Zitat und Anh\xE4nge und schlie\xDFt die Karte, sobald Robin den Entwurf abschickt.`;
   const uidSchema = { type: "integer", minimum: 1, description: "UID der Mail im Ordner" };
   const ordnerSchema = { type: "string", description: "IMAP-Ordner, Standard INBOX" };
-  const pfadListe = { type: "array", items: { type: "string" }, description: "Absolute Pfade unter dem Hauptverzeichnis des Leitstands" };
-  const adrListe = (d) => ({ type: "array", items: { type: "string" }, description: `${d}, als adresse oder Name <adresse>` });
+  const textOderListe = { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] };
+  const pfadListe = { ...textOderListe, description: "Absolute Pfade unter dem Hauptverzeichnis des Leitstands, ein Pfad oder eine Liste" };
+  const adrListe = (d) => ({ ...textOderListe, description: `${d}, als adresse oder Name <adresse>, eine Adresse oder eine Liste` });
   return [
     {
       name: "mail_posteingang",
@@ -110770,7 +110812,7 @@ function mailWerkzeuge(o) {
     },
     {
       name: "mail_entwurf_aendern",
-      beschreibung: "Entwurf \xE4ndern: neu ablegen, danach den alten l\xF6schen. Neuer Text ersetzt den Text vor Signatur und Zitat. Bestehende Anh\xE4nge bleiben, au\xDFer anhaenge_behalten ist false.",
+      beschreibung: "Entwurf \xE4ndern: neu ablegen, danach den alten l\xF6schen. Neuer Text ersetzt den Text vor Signatur und Zitat, das Zitat bleibt immer. Erkennt das Werkzeug die Signatur nicht, setzt es die aktuelle neu ein (signatur_neu_gesetzt). Bestehende Anh\xE4nge bleiben, au\xDFer anhaenge_behalten ist false.",
       schema: {
         type: "object",
         properties: {
@@ -110797,17 +110839,17 @@ function mailWerkzeuge(o) {
               throw new WerkzeugFehler(`UID ${uid} ist kein Entwurf`);
             const o2 = original(p);
             const t2 = str(a, "text");
-            const inhalt = t2 === null ? { text: p.text ?? "", html: p.html ?? `<div>${(p.text ?? "").replace(/\n/g, "<br>")}</div>`, behalten: true } : ersetzeText({ text: p.text ?? "", html: p.html ?? null }, t2, signaturTeil(k.absender, true)?.text ?? "");
+            const inhalt = t2 === null ? { text: p.text ?? "", html: p.html ?? `<div>${(p.text ?? "").replace(/\n/g, "<br>")}</div>`, behalten: true, signaturNeu: false, zitatBehalten: true, bilder: [] } : ersetzeText({ text: p.text ?? "", html: p.html ?? null }, t2, signaturTeil(k.absender, true));
             const alte = bool(a, "anhaenge_behalten", true) ? p.attachments.map((x) => ({ name: x.filename ?? "anhang", inhalt: bytes(x.content), typ: x.mimeType })) : [];
             const an = a.an === undefined ? o2.an : personen(a, "an");
             const cc = a.cc === undefined ? o2.cc : personen(a, "cc");
-            const roh = await baueRoh({ absender: k.absender, an, cc, betreff: kopfText(a, "betreff") ?? o2.betreff, text: inhalt.text, html: inhalt.html, anhaenge: [...alte, ...neueDateien], session: wer.session, inReplyTo: p.inReplyTo ?? null, references: o2.references, uuid: entwurfKennung(n.source ?? Buffer.alloc(0)).uuid });
+            const roh = await baueRoh({ absender: k.absender, an, cc, betreff: kopfText(a, "betreff") ?? o2.betreff, text: inhalt.text, html: inhalt.html, anhaenge: [...alte, ...inhalt.bilder, ...neueDateien], session: wer.session, inReplyTo: p.inReplyTo ?? null, references: o2.references, uuid: entwurfKennung(n.source ?? Buffer.alloc(0)).uuid });
             const r = await c.append(d, roh, ["\\Draft", "\\Seen"]);
             if (!r)
               throw new WerkzeugFehler("Neuer Entwurf lie\xDF sich nicht ablegen, der alte bleibt");
             const geloescht = await entfernen(k, c, uid);
             const e = { ordner: d, uid: typeof r.uid === "number" ? r.uid : null, ...nurKennung(roh) };
-            return { entwurf: e, karten_hinweis: kartenHinweis(k.name, e, p.inReplyTo ? "antwort" : "neu"), alter_geloescht: geloescht, signatur_und_zitat_behalten: inhalt.behalten };
+            return { entwurf: e, karten_hinweis: kartenHinweis(k.name, e, p.inReplyTo ? "antwort" : "neu"), alter_geloescht: geloescht, signatur_und_zitat_behalten: inhalt.behalten && inhalt.zitatBehalten, signatur_neu_gesetzt: inhalt.signaturNeu, zitat_behalten: inhalt.zitatBehalten };
           });
         });
       }
@@ -111057,7 +111099,7 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.5.1";
+var VERSION = "1.5.2";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {
