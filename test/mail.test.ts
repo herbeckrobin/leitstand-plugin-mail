@@ -235,7 +235,7 @@ describe('Protokoll und Werkzeuge', () => {
   test('tools/list: Namen ohne Präfix, readOnlyHint nur bei den neun Lesewerkzeugen', async () => {
     const r = await verarbeite(defs(), { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     const tools = (r!.result as { tools: { name: string; annotations: { readOnlyHint: boolean } }[] }).tools;
-    expect(tools.map((t) => t.name).sort()).toEqual(['anhang_speichern', 'antwort_entwurf', 'entwurf_aendern', 'entwurf_finde', 'entwurf_loeschen', 'entwurf_neu', 'entwuerfe_liste', 'gesendet_finde', 'konto_pruefe', 'lesen', 'nachhol_zaehle', 'neue_seit', 'posteingang', 'suchen', 'triage_merke', 'verschieben'].sort());
+    expect(tools.map((t) => t.name).sort()).toEqual(['als_pdf', 'anhang_speichern', 'antwort_entwurf', 'entwurf_aendern', 'entwurf_finde', 'entwurf_loeschen', 'entwurf_neu', 'entwuerfe_liste', 'gesendet_finde', 'konto_pruefe', 'lesen', 'nachhol_zaehle', 'neue_seit', 'posteingang', 'suchen', 'triage_merke', 'verschieben'].sort());
     expect(tools.filter((t) => t.annotations.readOnlyHint).map((t) => t.name).sort()).toEqual(['entwuerfe_liste', 'entwurf_finde', 'gesendet_finde', 'konto_pruefe', 'lesen', 'nachhol_zaehle', 'neue_seit', 'posteingang', 'suchen']);
   });
 

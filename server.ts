@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { baueKonten, leseKonten, lesePasswoerter, type ImapFabrik } from './konten.ts';
 import { imapFlow } from './imap.ts';
 import { sichererName } from './pfade.ts';
+import { textRenderer } from './pdf-text.ts';
 import { MailSignal, NACHHOL_DATEI, PUFFER_DATEI } from './signal.ts';
 import { MailTakt, taktWerkzeug } from './takt.ts';
 import { TRIAGE_DATEI } from './triage.ts';
@@ -16,7 +17,7 @@ import { mailWerkzeuge } from './werkzeuge.ts';
 // Der Text einer Meldung enthält nur Kontoname und Zahlen, nie Betreff, Adresse oder Inhalt.
 
 const PROTOKOLL = '2025-03-26';
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 
 /** Zahlen des Ereignisses mail.neu, Form wie im Vertrag mit dem Kern (mailNeuDaten). */
 export interface MailNeuDaten {
@@ -128,7 +129,7 @@ if (import.meta.main) {
   const log = (z: string): void => void process.stderr.write(`${new Date().toISOString()} ${z}\n`);
   const schreibe = (j: Json): void => void process.stdout.write(`${JSON.stringify(j)}\n`);
   const fabrik: ImapFabrik = imapFlow;
-  const alle = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync(daten, { recursive: true }), join(daten, TRIAGE_DATEI)) }));
+  const alle = lokaleWerkzeuge(mailWerkzeuge({ konten: () => baueKonten(process.env, fabrik), triageDatei: () => (mkdirSync(daten, { recursive: true }), join(daten, TRIAGE_DATEI)), pdf: textRenderer }));
   const klappe = { zu: false };
   // Der Text ist fertig (roh): der Kern stellt ihn unverändert zu, daten bleibt leer.
   const signal = new MailSignal({

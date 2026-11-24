@@ -8,6 +8,7 @@ Mail läuft über die Werkzeuge `mcp__leitstand__mail_*` (IMAP direkt am Server)
 | `mail_suchen` | Nach `von`, `betreff`, `seit`, `bis` (JJJJ-MM-TT), mindestens eins davon, `ordner` wählbar |
 | `mail_lesen` | Kopf, Text und Anhangliste (Index, Name, Typ, Größe) zu einer `uid` |
 | `mail_anhang_speichern` | Anhang nach `ziel` speichern, überschreibt nie |
+| `mail_als_pdf` | Mail als PDF-Textfassung (ohne Bilder) nach `ziel` (.pdf), überschreibt nie |
 | `mail_antwort_entwurf` | Antwort im Verlauf mit Zitat und Signatur, `allen`, `anhaenge` |
 | `mail_entwurf_neu` | Neuer Entwurf mit `an`, `cc`, `betreff`, `text`, `anhaenge` |
 | `mail_entwuerfe_liste` | Entwürfe im Entwürfe-Ordner |

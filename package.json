@@ -1,6 +1,6 @@
 {
   "name": "leitstand-plugin-mail",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,8 +9,10 @@
     "bau": "bun build --target bun server.ts --outfile dist/server.js"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "1.1.1",
     "imapflow": "2.10.0",
     "nodemailer": "10.3.1",
+    "pdf-lib": "1.17.1",
     "postal-mime": "4.2.0"
   },
   "devDependencies": {
