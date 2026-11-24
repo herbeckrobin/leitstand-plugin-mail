@@ -403,13 +403,16 @@ describe('Bundle dist/server.js', () => {
   });
 
   test('startet über stdio, antwortet auf tools/list und endet mit stdin sauber (Exit 0, ohne Passwörter)', async () => {
-    const p = Bun.spawn(['bun', bundle], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env: { PATH: process.env.PATH ?? '', PLUGIN_KONTEN: KONTEN } });
+    // Seit 1.5.1 verlangt der Start PLUGIN_DATEN (A-2404), ein Datenordner außerhalb des Repos.
+    const daten = mkdtempSync(join(tmpdir(), 'mail-bundle-daten-'));
+    const p = Bun.spawn(['bun', bundle], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env: { PATH: process.env.PATH ?? '', PLUGIN_KONTEN: KONTEN, PLUGIN_DATEN: daten } });
     p.stdin.write('{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n');
     p.stdin.end();
     const [aus, err, exit] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
     expect(exit).toBe(0);
     expect(aus).toContain('"posteingang"');
     expect(err).toContain('Wächter aus: Einstellung passwoerter fehlt');
+    rmSync(daten, { recursive: true, force: true });
   });
 });
 
