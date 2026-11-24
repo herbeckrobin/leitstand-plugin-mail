@@ -318,8 +318,10 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
 
   const uidSchema = { type: 'integer', minimum: 1, description: 'UID der Mail im Ordner' };
   const ordnerSchema = { type: 'string', description: 'IMAP-Ordner, Standard INBOX' };
-  const pfadListe = { type: 'array', items: { type: 'string' }, description: 'Absolute Pfade unter dem Hauptverzeichnis des Leitstands' };
-  const adrListe = (d: string) => ({ type: 'array', items: { type: 'string' }, description: `${d}, als adresse oder Name <adresse>` });
+  // Ein einzelner Text gilt als Liste mit einem Eintrag (liste() oben). Das Schema muss ihn erlauben, sonst lehnt der Client ihn vor dem Aufruf ab (A-2402).
+  const textOderListe = { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] };
+  const pfadListe = { ...textOderListe, description: 'Absolute Pfade unter dem Hauptverzeichnis des Leitstands, ein Pfad oder eine Liste' };
+  const adrListe = (d: string) => ({ ...textOderListe, description: `${d}, als adresse oder Name <adresse>, eine Adresse oder eine Liste` });
 
   return [
     {
@@ -540,7 +542,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
     },
     {
       name: 'mail_entwurf_aendern',
-      beschreibung: 'Entwurf ändern: neu ablegen, danach den alten löschen. Neuer Text ersetzt den Text vor Signatur und Zitat. Bestehende Anhänge bleiben, außer anhaenge_behalten ist false.',
+      beschreibung: 'Entwurf ändern: neu ablegen, danach den alten löschen. Neuer Text ersetzt den Text vor Signatur und Zitat, das Zitat bleibt immer. Erkennt das Werkzeug die Signatur nicht, setzt es die aktuelle neu ein (signatur_neu_gesetzt). Bestehende Anhänge bleiben, außer anhaenge_behalten ist false.',
       schema: {
         type: 'object',
         properties: {
@@ -566,16 +568,16 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
             if (!n.flags?.has('\\Draft')) throw new WerkzeugFehler(`UID ${uid} ist kein Entwurf`);
             const o = original(p);
             const t = str(a, 'text');
-            const inhalt = t === null ? { text: p.text ?? '', html: p.html ?? `<div>${(p.text ?? '').replace(/\n/g, '<br>')}</div>`, behalten: true } : ersetzeText({ text: p.text ?? '', html: p.html ?? null }, t, signaturTeil(k.absender, true)?.text ?? '');
+            const inhalt = t === null ? { text: p.text ?? '', html: p.html ?? `<div>${(p.text ?? '').replace(/\n/g, '<br>')}</div>`, behalten: true, signaturNeu: false, zitatBehalten: true, bilder: [] as Anhang[] } : ersetzeText({ text: p.text ?? '', html: p.html ?? null }, t, signaturTeil(k.absender, true));
             const alte = bool(a, 'anhaenge_behalten', true) ? p.attachments.map((x) => ({ name: x.filename ?? 'anhang', inhalt: bytes(x.content), typ: x.mimeType })) : [];
             const an = a.an === undefined ? o.an : personen(a, 'an');
             const cc = a.cc === undefined ? o.cc : personen(a, 'cc');
-            const roh = await baueRoh({ absender: k.absender, an, cc, betreff: kopfText(a, 'betreff') ?? o.betreff, text: inhalt.text, html: inhalt.html, anhaenge: [...alte, ...neueDateien], session: wer.session, inReplyTo: p.inReplyTo ?? null, references: o.references, uuid: entwurfKennung(n.source ?? Buffer.alloc(0)).uuid });
+            const roh = await baueRoh({ absender: k.absender, an, cc, betreff: kopfText(a, 'betreff') ?? o.betreff, text: inhalt.text, html: inhalt.html, anhaenge: [...alte, ...inhalt.bilder, ...neueDateien], session: wer.session, inReplyTo: p.inReplyTo ?? null, references: o.references, uuid: entwurfKennung(n.source ?? Buffer.alloc(0)).uuid });
             const r = await c.append(d, roh, ['\\Draft', '\\Seen']);
             if (!r) throw new WerkzeugFehler('Neuer Entwurf ließ sich nicht ablegen, der alte bleibt');
             const geloescht = await entfernen(k, c, uid);
             const e = { ordner: d, uid: typeof r.uid === 'number' ? r.uid : null, ...nurKennung(roh) };
-            return { entwurf: e, karten_hinweis: kartenHinweis(k.name, e, p.inReplyTo ? 'antwort' : 'neu'), alter_geloescht: geloescht, signatur_und_zitat_behalten: inhalt.behalten };
+            return { entwurf: e, karten_hinweis: kartenHinweis(k.name, e, p.inReplyTo ? 'antwort' : 'neu'), alter_geloescht: geloescht, signatur_und_zitat_behalten: inhalt.behalten && inhalt.zitatBehalten, signatur_neu_gesetzt: inhalt.signaturNeu, zitat_behalten: inhalt.zitatBehalten };
           });
         });
       },

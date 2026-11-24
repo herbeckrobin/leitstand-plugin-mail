@@ -1,5 +1,5 @@
 name: mail
-version: "1.5.0"
+version: "1.5.2"
 titel: Mail
 beschreibung: "Mail über IMAP (Mailcow, Google per App-Passwort): lesen, suchen, Entwürfe anlegen, ändern und verschieben. Robin schickt Entwürfe selbst ab, Versand gibt es nicht. Der Wächter meldet neue Mails per IDLE als Ereignis mail.neu. Dazu Lesewerkzeuge für den Kern und eine Kontoprüfung."
 start: [bun, dist/server.js]
