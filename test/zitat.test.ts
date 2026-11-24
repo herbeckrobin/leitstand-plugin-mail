@@ -175,6 +175,51 @@ describe('ersetzeText: Zitat bleibt, Signatur wird neu gesetzt', () => {
     expect(b.html).not.toContain('Alt<');
   });
 
+  test('A-2412 ohne text: alte Textsignatur wird durch die aktuelle HTML-Signatur ersetzt, Zitat und Text davor byte-gleich', async () => {
+    const alt = await entwurf(absender('Alte Grüße\nAlter Name', '<div>Alte Grüße<br>Alter Name</div>'));
+    const neuAbs = absender(SIG.text, SIG.html);
+    const r = ersetzeText(alt, null, signaturTeil(neuAbs, true));
+    expect(r.signaturNeu).toBe(true);
+    expect(r.zitatBehalten).toBe(true);
+    expect(r.html).toContain('Tel 123');
+    expect(r.html).not.toContain('Alter Name');
+    expect(r.text).toContain('Tel 123');
+    expect(r.text).not.toContain('Alter Name');
+    const zh = (s: string) => s.slice(s.indexOf('<div><br><blockquote'));
+    expect(zh(r.html)).toBe(zh(alt.html ?? ''));
+    expect(r.html.startsWith((alt.html ?? '').slice(0, (alt.html ?? '').indexOf('<!-- leitstand-signatur -->')))).toBe(true);
+    const zt = (s: string) => s.slice(s.indexOf('Am '));
+    expect(zt(r.text)).toBe(zt(alt.text));
+    expect(r.text.startsWith('Alter Text\n')).toBe(true);
+  });
+
+  test('A-2412 ohne text: Entwurf mit der aktuellen Signatur bleibt unverändert', async () => {
+    const abs = absender(SIG.text, SIG.html);
+    const alt = await entwurf(abs);
+    const r = ersetzeText(alt, null, signaturTeil(abs, true));
+    expect(r.signaturNeu).toBe(false);
+    expect(r.text).toBe(alt.text);
+    expect(r.html).toBe(alt.html ?? '');
+  });
+
+  test('A-2412 ohne text: Entwurf ohne Signatur bleibt unverändert', async () => {
+    const keine: Absender = { name: 'Test Absender', adresse: 'ich@example.test', signatur: '' };
+    const alt = await entwurf(keine);
+    const r = ersetzeText(alt, null, signaturTeil(absender(SIG.text, SIG.html), true));
+    expect(r.signaturNeu).toBe(false);
+    expect(r.text).toBe(alt.text);
+    expect(r.html).toBe(alt.html ?? '');
+  });
+
+  test('A-2412 mit text: abweichende Signatur wird ebenfalls ersetzt, Zitat bleibt', async () => {
+    const alt = await entwurf(absender('Alte Grüße\nAlter Name', '<div>Alte Grüße<br>Alter Name</div>'));
+    const r = ersetzeText(alt, 'Neu', signaturTeil(absender(SIG.text, SIG.html), true));
+    expect(r.signaturNeu).toBe(true);
+    expect(r.html).not.toContain('Alter Name');
+    expect(r.html).toContain('Tel 123');
+    expect(r.zitatBehalten).toBe(true);
+  });
+
   test('ohne Signatur im Konto bleibt das Zitat, es kommt keine Signatur dazu', async () => {
     const keine: Absender = { name: 'Test Absender', adresse: 'ich@example.test', signatur: '' };
     const alt = await entwurf(keine);

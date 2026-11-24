@@ -542,7 +542,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
     },
     {
       name: 'mail_entwurf_aendern',
-      beschreibung: 'Entwurf ändern: neu ablegen, danach den alten löschen. Neuer Text ersetzt den Text vor Signatur und Zitat, das Zitat bleibt immer. Erkennt das Werkzeug die Signatur nicht, setzt es die aktuelle neu ein (signatur_neu_gesetzt). Bestehende Anhänge bleiben, außer anhaenge_behalten ist false.',
+      beschreibung: 'Entwurf ändern: neu ablegen, danach den alten löschen. Neuer Text ersetzt den Text vor Signatur und Zitat, das Zitat bleibt immer. Erkennt das Werkzeug die Signatur nicht oder weicht sie von der eingestellten ab, setzt es die aktuelle neu ein (signatur_neu_gesetzt), auch ohne text. Bestehende Anhänge bleiben, außer anhaenge_behalten ist false.',
       schema: {
         type: 'object',
         properties: {
@@ -568,7 +568,7 @@ export function mailWerkzeuge(o: MailOrt): Werkzeug[] {
             if (!n.flags?.has('\\Draft')) throw new WerkzeugFehler(`UID ${uid} ist kein Entwurf`);
             const o = original(p);
             const t = str(a, 'text');
-            const inhalt = t === null ? { text: p.text ?? '', html: p.html ?? `<div>${(p.text ?? '').replace(/\n/g, '<br>')}</div>`, behalten: true, signaturNeu: false, zitatBehalten: true, bilder: [] as Anhang[] } : ersetzeText({ text: p.text ?? '', html: p.html ?? null }, t, signaturTeil(k.absender, true));
+            const inhalt = ersetzeText({ text: p.text ?? '', html: p.html ?? null }, t, signaturTeil(k.absender, true));
             const alte = bool(a, 'anhaenge_behalten', true) ? p.attachments.map((x) => ({ name: x.filename ?? 'anhang', inhalt: bytes(x.content), typ: x.mimeType })) : [];
             const an = a.an === undefined ? o.an : personen(a, 'an');
             const cc = a.cc === undefined ? o.cc : personen(a, 'cc');

@@ -1991,7 +1991,7 @@ var require_indexes = __commonJS((exports, module) => {
 
 // node_modules/thread-stream/index.js
 var require_thread_stream = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-zitat/node_modules/thread-stream";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-sigtausch/node_modules/thread-stream";
   var { version } = require_package();
   var { EventEmitter } = __require("events");
   var { Worker } = __require("worker_threads");
@@ -2553,7 +2553,7 @@ var require_thread_stream = __commonJS((exports, module) => {
 
 // node_modules/pino/lib/transport.js
 var require_transport = __commonJS((exports, module) => {
-  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-zitat/node_modules/pino/lib";
+  var __dirname = "/Volumes/Work/Code/Intern/leitstand/Code/plugins/mail-sigtausch/node_modules/pino/lib";
   var { createRequire } = __require("module");
   var { existsSync } = __require("fs");
   var getCallers = require_caller();
@@ -110224,7 +110224,65 @@ function zitatStartHtml(h) {
   const i4 = Math.min(...treffer);
   return h.slice(0, i4).endsWith("<div><br>") ? i4 - "<div><br>".length : i4;
 }
+var htmlNorm = (h) => h.replace(/<!--[\s\S]*?-->/g, "").replace(/>\s+</g, "><").replace(/\s+/g, " ").trim();
+var signaturGleich = (gefunden, aktuell) => htmlNorm(gefunden) === htmlNorm(aktuell);
+function tauscheTextBlock(t2, alteSig, neu) {
+  const alt = vergleich(alteSig).split(`
+`).filter(Boolean);
+  if (!alt.length)
+    return null;
+  const zt = zitatStartText(t2);
+  const ende = zt >= 0 ? zt : t2.length;
+  const zeilen = [];
+  for (let p = 0;p < ende; ) {
+    const nl = t2.indexOf(`
+`, p);
+    const rand = nl < 0 || nl > ende ? ende : nl;
+    const bis = t2[rand - 1] === "\r" ? rand - 1 : rand;
+    zeilen.push({ von: p, bis, n: vergleich(t2.slice(p, bis)) });
+    p = rand + 1;
+  }
+  for (let i4 = zeilen.length - 1;i4 >= 0; i4--) {
+    if (zeilen[i4].n !== alt[0])
+      continue;
+    let k = 0;
+    let letzte = i4;
+    for (let j = i4;j < zeilen.length && k < alt.length; j++) {
+      if (!zeilen[j].n)
+        continue;
+      if (zeilen[j].n !== alt[k])
+        break;
+      k++;
+      letzte = j;
+    }
+    if (k === alt.length)
+      return t2.slice(0, zeilen[i4].von) + neu.replace(/\r\n/g, `
+`).trim() + t2.slice(zeilen[letzte].bis);
+  }
+  return null;
+}
+function tauscheSignatur(alt, sig) {
+  const unveraendert = { text: alt.text, html: alt.html ?? `<div>${esc(alt.text).replace(/\n/g, "<br>")}</div>`, behalten: true, signaturNeu: false, zitatBehalten: true, bilder: [] };
+  if (!sig || !alt.html)
+    return unveraendert;
+  const zh = zitatStartHtml(alt.html);
+  const bodyEnde = alt.html.lastIndexOf("</body>");
+  const ende = zh >= 0 ? zh : bodyEnde >= 0 ? bodyEnde : alt.html.length;
+  const kopf = alt.html.slice(0, ende);
+  const mi = kopf.indexOf(SIG_MARKER);
+  const start = mi >= 0 ? mi : kopf.indexOf("<div>-- <br>");
+  if (start < 0)
+    return unveraendert;
+  const gefunden = kopf.slice(start);
+  if (signaturGleich(gefunden, sig.html))
+    return unveraendert;
+  const html2 = alt.html.slice(0, start) + sig.html + alt.html.slice(ende);
+  const text4 = tauscheTextBlock(alt.text, htmlZuText(gefunden), sig.text) ?? alt.text;
+  return { text: text4, html: html2, behalten: false, signaturNeu: true, zitatBehalten: true, bilder: sig.bilder };
+}
 function ersetzeText(alt, neu, sig = null) {
+  if (neu === null)
+    return tauscheSignatur(alt, sig);
   const t2 = alt.text.replace(/\r\n/g, `
 `);
   const body = neu.trimEnd();
@@ -110248,7 +110306,7 @@ function ersetzeText(alt, neu, sig = null) {
   let behalten = false;
   const mi = kopfHtml.indexOf(SIG_MARKER);
   const ti = mi < 0 ? kopfHtml.indexOf("<div>-- <br>") : -1;
-  if (mi >= 0 || ti >= 0) {
+  if ((mi >= 0 || ti >= 0) && !(sig && !signaturGleich(kopfHtml.slice(mi >= 0 ? mi : ti), sig.html))) {
     sigHtml = kopfHtml.slice(mi >= 0 ? mi : ti);
     behalten = true;
   }
@@ -110812,7 +110870,7 @@ function mailWerkzeuge(o) {
     },
     {
       name: "mail_entwurf_aendern",
-      beschreibung: "Entwurf \xE4ndern: neu ablegen, danach den alten l\xF6schen. Neuer Text ersetzt den Text vor Signatur und Zitat, das Zitat bleibt immer. Erkennt das Werkzeug die Signatur nicht, setzt es die aktuelle neu ein (signatur_neu_gesetzt). Bestehende Anh\xE4nge bleiben, au\xDFer anhaenge_behalten ist false.",
+      beschreibung: "Entwurf \xE4ndern: neu ablegen, danach den alten l\xF6schen. Neuer Text ersetzt den Text vor Signatur und Zitat, das Zitat bleibt immer. Erkennt das Werkzeug die Signatur nicht oder weicht sie von der eingestellten ab, setzt es die aktuelle neu ein (signatur_neu_gesetzt), auch ohne text. Bestehende Anh\xE4nge bleiben, au\xDFer anhaenge_behalten ist false.",
       schema: {
         type: "object",
         properties: {
@@ -110839,7 +110897,7 @@ function mailWerkzeuge(o) {
               throw new WerkzeugFehler(`UID ${uid} ist kein Entwurf`);
             const o2 = original(p);
             const t2 = str(a, "text");
-            const inhalt = t2 === null ? { text: p.text ?? "", html: p.html ?? `<div>${(p.text ?? "").replace(/\n/g, "<br>")}</div>`, behalten: true, signaturNeu: false, zitatBehalten: true, bilder: [] } : ersetzeText({ text: p.text ?? "", html: p.html ?? null }, t2, signaturTeil(k.absender, true));
+            const inhalt = ersetzeText({ text: p.text ?? "", html: p.html ?? null }, t2, signaturTeil(k.absender, true));
             const alte = bool(a, "anhaenge_behalten", true) ? p.attachments.map((x) => ({ name: x.filename ?? "anhang", inhalt: bytes(x.content), typ: x.mimeType })) : [];
             const an = a.an === undefined ? o2.an : personen(a, "an");
             const cc = a.cc === undefined ? o2.cc : personen(a, "cc");
@@ -111099,7 +111157,7 @@ function mailWerkzeuge(o) {
 
 // server.ts
 var PROTOKOLL = "2025-03-26";
-var VERSION = "1.5.2";
+var VERSION = "1.5.3";
 var WER = { session: "plugin-mail" };
 var lokaleWerkzeuge = (w) => w.map((x) => ({ ...x, name: x.name.replace(/^mail_/, "") }));
 async function verarbeite(defs, msg) {
