@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ImapLike, ImapNachricht, ImapSuche } from '../imap.ts';
-import { baueNeu, signaturTeil } from '../bau.ts';
+import { baueAntwort, baueNeu, signaturTeil } from '../bau.ts';
 import { baueKonten, leseKonten, lesePasswoerter, leseSignatur } from '../konten.ts';
 import { lokaleWerkzeuge, starteWaechter, verarbeite } from '../server.ts';
 import type { ImapClient } from '../waechter.ts';
@@ -143,7 +143,33 @@ describe('Einstellungen', () => {
     expect(leseKonten({ PLUGIN_KONTEN: '[{"name":"a","host":"h","benutzer":"u","port":0}]' }).ok).toBe(false);
     expect(leseKonten({ PLUGIN_KONTEN: '[{"name":"a","host":"h","benutzer":"u"},{"name":"a","host":"h","benutzer":"u"}]' }).ok).toBe(false);
     const r = leseKonten({ PLUGIN_KONTEN: '[{"name":"a","host":"h","benutzer":"u","loeschen":"papierkorb"}]' });
-    expect(r.ok && r.wert[0]).toMatchObject({ port: 993, adresse: 'u', anzeigename: 'a', loeschen: 'papierkorb' });
+    expect(r.ok && r.wert[0]).toMatchObject({ port: 993, adresse: 'u', anzeigename: null, loeschen: 'papierkorb' });
+  });
+
+  test('From-Name: Konto mit Namen, sonst absender_name, sonst leer, nie der Kontoname (A-2395)', async () => {
+    const konten = (anzeigename?: string) => JSON.stringify([{ name: 'mailcow', host: 'imap.example.test', benutzer: 'erika@example.test', ...(anzeigename ? { anzeigename } : {}) }]);
+    const pass = JSON.stringify({ mailcow: 'geheim-pw-123' });
+    const original = { von: { name: 'Max', address: 'max@example.test' }, antwortAn: [], an: [], cc: [], betreff: 'Frage', messageId: '<a@example.test>', references: [], datum: new Date('2026-11-20T10:00:00Z'), text: 'Hallo', html: null };
+    // Der Kopf From: steht im Rohtext, nodemailer kodiert Anführungszeichen nur bei Bedarf.
+    const von = (roh: Buffer) => /^From: (.*)$/m.exec(roh.toString())![1]!;
+    const faelle: [string, Record<string, string>, string][] = [
+      ['Konto mit Namen behält ihn, auch mit absender_name', { PLUGIN_KONTEN: konten('Erika Muster'), PLUGIN_ABSENDER_NAME: 'Max Beispiel' }, 'Erika Muster'],
+      ['ohne Kontoname nimmt absender_name', { PLUGIN_KONTEN: konten(), PLUGIN_ABSENDER_NAME: ' Max Beispiel ' }, 'Max Beispiel'],
+      ['ohne beides nur die Adresse', { PLUGIN_KONTEN: konten() }, ''],
+      ['leeres absender_name zählt als fehlend', { PLUGIN_KONTEN: konten(), PLUGIN_ABSENDER_NAME: '  ' }, ''],
+    ];
+    for (const [titel, e, erwartet] of faelle) {
+      const a = baueKonten({ ...e, PLUGIN_PASSWOERTER: pass })[0]!.absender;
+      expect(a.name, titel).toBe(erwartet);
+      const neu = von(await baueNeu({ absender: a, an: [{ address: 'x@example.test' }], cc: [], betreff: 'b', text: 'Hallo', signatur: false, anhaenge: [], session: 's' }));
+      const antwort = von(await baueAntwort({ original, absender: a, text: 'Danke', allen: false, signatur: false, anhaenge: [], session: 's' }));
+      for (const kopf of [neu, antwort]) {
+        expect(kopf, titel).not.toContain('mailcow');
+        expect(kopf, titel).toContain('erika@example.test');
+        if (erwartet) expect(kopf, titel).toContain(erwartet);
+        else expect(kopf, titel).toBe('erika@example.test');
+      }
+    }
   });
 
   test('Signatur: nur Text, nur HTML, beides leer', async () => {

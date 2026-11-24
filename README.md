@@ -60,10 +60,11 @@ Nicht gebaut: Vorschau auf der Review-Karte und die Tagesablauf-Einstellung (ADR
 
 ## Einstellungen
 
-- `konten` (Pflicht): JSON-Liste, je Eintrag `name`, `host`, `benutzer`, optional `port` (993), `adresse`, `anzeigename`, `loeschen` (`expunge` oder `papierkorb`, Gmail braucht `papierkorb`). Setzbar mit `plugin_wert_setzen`.
+- `konten` (Pflicht): JSON-Liste, je Eintrag `name`, `host`, `benutzer`, optional `port` (993), `adresse`, `anzeigename` (From-Name des Kontos, ohne ihn gilt `absender_name`, nie der Kontoname), `loeschen` (`expunge` oder `papierkorb`, Gmail braucht `papierkorb`). Setzbar mit `plugin_wert_setzen`.
 - `passwoerter` (Pflicht, geheim): JSON-Objekt Kontoname auf Passwort, Google mit App-Passwort. Nur das Fenster trägt es ein (Schlüsselbund). Ein Parsefehler nennt nie einen Teil des Werts.
 - `triage_an` (Standard aus), `triage_takt_min` (Standard 10): Mail-Triage im Takt, siehe "Takt und Aktionen".
-- `signatur_html`, `signatur_text`: Signatur für Entwürfe. `signatur_text` allein genügt (HTML wird daraus gebaut), mit `signatur_html` dient `signatur_text` als Textteil. Beide leer: kein Gruß.
+- `absender_name` (empfohlen, ohne Standard): From-Name für Konten ohne `anzeigename`. Fehlt auch er, trägt der From-Kopf nur die Adresse.
+- `signatur_html`, `signatur_text` (`signatur_text` empfohlen): Signatur für Entwürfe. `signatur_text` allein genügt (HTML wird daraus gebaut), mit `signatur_html` dient `signatur_text` als Textteil. Beide leer: kein Gruß.
 
 Beispiel `konten` (ohne Zugangsdaten):
 
